@@ -1,0 +1,65 @@
+# Local configuration (copy from rrmg_config.example.sh)
+rrmg_config.sh
+.rrmg/
+
+# Python package build artifacts and isolated test environments
+build/
+dist/
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Workflow inputs and generated data
+input/
+ref/
+temp/
+result/
+logs/
+figure_data/
+genomes/
+
+# Large bioinformatics files
+*.bam
+*.bai
+*.crai
+*.cram
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.fasta
+*.fasta.gz
+*.fa
+*.fa.gz
+*.fna
+*.fna.gz
+*.mmi
+*.sam
+*.vcf
+*.vcf.gz
+
+# Runtime and editor files
+*.log
+*.tmp
+*.swp
+*.swo
+*.pid
+__pycache__/
+*.py[cod]
+.Rhistory
+.DS_Store
+Thumbs.db
+
+# Local snapshots and one-off run reports
+code_backup_*/
+code_original_backup_*/
+step2_incomplete_mixed_reads.tsv
+
+# Superseded compatibility/runbook files retained locally but not published
+README_流程交接说明.md
+RRMG_pipeline_runbook_simplified_updated_v2.sh
+RRMG_add_target_only_CYP51A_figure_data_runbook.sh
+RRMG_supplementary_downstream_runbook.sh
+rrmg_virtual_metagenome_permutation.sh
+rrmg_step4_supplementary_downstream.sh
+rrmg_step4_supplementary_downstream_array.pbs

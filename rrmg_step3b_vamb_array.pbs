@@ -1,0 +1,104 @@
+#!/bin/bash
+# Run one independent VAMB analysis for each permutation plan row. Site paths
+# and runtime parameters are read from rrmg_config.sh.
+#
+# Submit only after the corresponding Step 3 assembly array has completed.
+# This is intentionally single-sample VAMB, not VAMB multi-split, because the
+# current RRMG design reuses identical background reads among seed replicates.
+#PBS -N rrmg_vamb
+#PBS -l walltime=36:00:00
+#PBS -l select=1:ncpus=32:mem=180gb
+#PBS -j oe
+#PBS -S /bin/bash
+
+set -euo pipefail
+
+CONFIG="${RRMG_CONFIG:-${PBS_O_WORKDIR:-$PWD}/rrmg_config.sh}"
+[[ -r "$CONFIG" ]] || { echo "[ERROR] Configuration not found: $CONFIG" >&2; exit 1; }
+# shellcheck disable=SC1090
+source "$CONFIG"
+
+: "${WD:?Set WD in $CONFIG}"
+: "${PIPELINE_DIR:?Set PIPELINE_DIR in $CONFIG}"
+: "${CONDA_SH:?Set CONDA_SH in $CONFIG}"
+: "${RRMG_CONDA_ENV:?Set RRMG_CONDA_ENV in $CONFIG}"
+
+PLAN="${PLAN:-input/rrmg/rrmg_permutation_plan.tsv}"
+THREADS="${STEP3B_THREADS:-32}"
+MIN_CONTIG="${VAMB_MIN_CONTIG:-2000}"
+MIN_BIN_SIZE="${VAMB_MIN_BIN_SIZE:-200000}"
+VAMB_SEED="${VAMB_SEED:-42}"
+VAMB_COMMAND="${VAMB_COMMAND:-vamb}"
+USE_CUDA="${VAMB_USE_CUDA:-0}"
+ROW_INDEX="${PBS_ARRAY_INDEX:-${RRMG_ROW_INDEX:-}}"
+[[ "$ROW_INDEX" =~ ^[0-9]+$ ]] || { echo "[ERROR] Missing/invalid array row index: ${ROW_INDEX:-unset}" >&2; exit 1; }
+
+cd "$WD"
+LOG_DIR="${RRMG_LOG_DIR:-logs/pbs}"
+mkdir -p "$LOG_DIR"
+
+exec > >(tee -a "$LOG_DIR/step3b_vamb_${PBS_JOBID:-manual}.${PBS_ARRAY_INDEX:-manual}.log") 2>&1
+
+echo "++++++++++++++++++++++++++++++++++++++++"
+echo "Step 3B: VAMB binning"
+echo "Host            : $(hostname)"
+echo "PBS_JOBID       : ${PBS_JOBID:-NA}"
+echo "PBS_ARRAY_INDEX : ${PBS_ARRAY_INDEX:-NA}"
+echo "ROW_INDEX       : $ROW_INDEX"
+echo "CONFIG          : $CONFIG"
+echo "WD              : $WD"
+echo "Start time      : $(date)"
+echo "++++++++++++++++++++++++++++++++++++++++"
+
+source "$CONDA_SH"
+export CONDA_SH
+export RRMG_CONDA_ENV
+conda activate "$RRMG_CONDA_ENV"
+
+[[ -s "$PLAN" ]] || { echo "[ERROR] Missing plan: $PLAN"; exit 1; }
+STEP_SCRIPT="${PIPELINE_DIR}/rrmg_step3b_vamb_binning.sh"
+[[ -s "$STEP_SCRIPT" ]] || {
+  echo "[ERROR] Missing script: $STEP_SCRIPT"
+  exit 1
+}
+[[ -s "${PIPELINE_DIR}/rrmg_evaluate_vamb_bins.py" ]] || {
+  echo "[ERROR] Missing evaluator: ${PIPELINE_DIR}/rrmg_evaluate_vamb_bins.py"
+  exit 1
+}
+
+for executable in python3 minimap2 samtools "$VAMB_COMMAND"; do
+  command -v "$executable" >/dev/null 2>&1 || {
+    echo "[ERROR] Missing command in ${RRMG_CONDA_ENV}: $executable"
+    exit 1
+  }
+done
+
+echo "[INFO] PLAN         : $PLAN"
+echo "[INFO] THREADS      : $THREADS"
+echo "[INFO] MIN_CONTIG   : $MIN_CONTIG"
+echo "[INFO] MIN_BIN_SIZE : $MIN_BIN_SIZE"
+echo "[INFO] VAMB_SEED    : $VAMB_SEED"
+echo "[INFO] VAMB_COMMAND : $(command -v "$VAMB_COMMAND")"
+"$VAMB_COMMAND" --version || true
+
+VAMB_EXTRA=()
+if [[ "$USE_CUDA" -eq 1 ]]; then
+  VAMB_EXTRA+=(--cuda)
+fi
+[[ "${RRMG_FORCE_OVERRIDE:-${VAMB_FORCE:-0}}" -eq 1 ]] && VAMB_EXTRA+=(--force)
+
+bash "$STEP_SCRIPT" \
+  "$PLAN" \
+  "$ROW_INDEX" \
+  -w "$WD" \
+  -t "$THREADS" \
+  --min-contig "$MIN_CONTIG" \
+  --min-bin-size "$MIN_BIN_SIZE" \
+  --vamb-seed "$VAMB_SEED" \
+  --vamb-command "$VAMB_COMMAND" \
+  "${VAMB_EXTRA[@]}"
+
+echo "++++++++++++++++++++++++++++++++++++++++"
+echo "Step 3B done: $(date)"
+echo "[DONE] ROW_INDEX=${ROW_INDEX}"
+echo "++++++++++++++++++++++++++++++++++++++++"

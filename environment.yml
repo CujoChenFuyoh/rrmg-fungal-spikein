@@ -1,0 +1,20 @@
+name: fungamr_meta
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11
+  - bbmap
+  - fastp
+  - kraken2
+  - minimap2
+  - ncbi-datasets-cli
+  - samtools
+  - spades
+  - vamb
+
+# This human-readable environment file is a portable starting point, not an
+# exact lock. After validating the workflow on Linux, also commit a platform
+# lock generated from the working environment:
+#   conda list -n fungamr_meta --explicit > conda-linux-64.lock

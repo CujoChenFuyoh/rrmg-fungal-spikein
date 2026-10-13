@@ -1,0 +1,92 @@
+#!/bin/bash
+# PBS wrapper for one background_plan.tsv row.
+# Site paths and runtime parameters are read from rrmg_config.sh. Submit through
+# rrmg_submit.sh so the array bound is derived from the current plan.
+#PBS -N rrmg_bg_array
+#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=16:mem=96gb
+#PBS -j oe
+#PBS -S /bin/bash
+
+set -euo pipefail
+
+CONFIG="${RRMG_CONFIG:-${PBS_O_WORKDIR:-$PWD}/rrmg_config.sh}"
+[[ -r "$CONFIG" ]] || { echo "[ERROR] Configuration not found: $CONFIG" >&2; exit 1; }
+# shellcheck disable=SC1090
+source "$CONFIG"
+
+: "${WD:?Set WD in $CONFIG}"
+: "${PIPELINE_DIR:?Set PIPELINE_DIR in $CONFIG}"
+: "${CONDA_SH:?Set CONDA_SH in $CONFIG}"
+: "${RRMG_CONDA_ENV:?Set RRMG_CONDA_ENV in $CONFIG}"
+: "${BBMAP_DIR:?Set BBMAP_DIR in $CONFIG}"
+: "${RANDOMREADSMG_SH:?Set RANDOMREADSMG_SH in $CONFIG}"
+: "${JAVA_HOME:?Set JAVA_HOME in $CONFIG}"
+: "${JAVA_BIN:?Set JAVA_BIN in $CONFIG}"
+
+BACKGROUND_PLAN="${BACKGROUND_PLAN:-temp/rrmg_background/background_plan.tsv}"
+THREADS="${STEP1_THREADS:-8}"
+BBMAP_XMX="${STEP1_BBMAP_XMX:-32g}"
+BACKGROUND_SEED="${BACKGROUND_SEED:-1000}"
+ROW_INDEX="${PBS_ARRAY_INDEX:-${RRMG_ROW_INDEX:-}}"
+[[ "$ROW_INDEX" =~ ^[0-9]+$ ]] || { echo "[ERROR] Missing/invalid array row index: ${ROW_INDEX:-unset}" >&2; exit 1; }
+
+cd "$WD"
+LOG_DIR="${RRMG_LOG_DIR:-logs/pbs}"
+mkdir -p "$LOG_DIR"
+
+exec > >(tee -a "$LOG_DIR/step1_background_${PBS_JOBID:-manual}.${PBS_ARRAY_INDEX:-manual}.log") 2>&1
+
+echo "++++++++++++++++++++++++++++++++++++++++"
+echo "Step 1B: make one background-read set"
+echo "Host            : $(hostname)"
+echo "PBS_JOBID       : ${PBS_JOBID:-NA}"
+echo "PBS_ARRAY_INDEX : ${PBS_ARRAY_INDEX:-NA}"
+echo "CONFIG          : $CONFIG"
+echo "WD              : $WD"
+echo "Start time      : $(date)"
+echo "++++++++++++++++++++++++++++++++++++++++"
+
+source "$CONDA_SH"
+export CONDA_SH
+export RRMG_CONDA_ENV
+export BBMAP_DIR
+export RANDOMREADSMG_SH
+export JAVA_HOME
+export JAVA_BIN
+export THREADS
+export BBMAP_XMX
+export BACKGROUND_SEED
+export PATH="${BBMAP_DIR}:${JAVA_HOME}/bin:${PATH}"
+conda activate "$RRMG_CONDA_ENV"
+[[ -s "$BACKGROUND_PLAN" ]] || { echo "[ERROR] Missing background plan: $BACKGROUND_PLAN"; exit 1; }
+[[ -s "$RANDOMREADSMG_SH" ]] || { echo "[ERROR] Missing RANDOMREADSMG_SH: $RANDOMREADSMG_SH"; exit 1; }
+[[ -x "$JAVA_BIN" ]] || { echo "[ERROR] JAVA_BIN is not executable: $JAVA_BIN"; exit 1; }
+STEP_SCRIPT="${PIPELINE_DIR}/rrmg_step1_make_background_reads.sh"
+[[ -s "$STEP_SCRIPT" ]] || { echo "[ERROR] Missing script: $STEP_SCRIPT"; exit 1; }
+
+echo "[INFO] BACKGROUND_PLAN  : $BACKGROUND_PLAN"
+echo "[INFO] BBMAP_DIR        : $BBMAP_DIR"
+echo "[INFO] RANDOMREADSMG_SH : $RANDOMREADSMG_SH"
+echo "[INFO] JAVA_HOME        : $JAVA_HOME"
+echo "[INFO] JAVA_BIN         : $JAVA_BIN"
+echo "[INFO] THREADS          : $THREADS"
+echo "[INFO] BBMAP_XMX        : $BBMAP_XMX"
+echo "[INFO] java in PATH     : $(command -v java || true)"
+echo "[INFO] randomreadsmg    : $(command -v randomreadsmg.sh || true)"
+"$JAVA_BIN" -version
+java -version
+
+EXTRA_ARGS=()
+[[ "${RRMG_FORCE_OVERRIDE:-${STEP1_FORCE:-0}}" -eq 1 ]] && EXTRA_ARGS+=(--force)
+
+bash "$STEP_SCRIPT" \
+  --background-plan "$BACKGROUND_PLAN" \
+  --row-index "$ROW_INDEX" \
+  -w "$WD" \
+  "${EXTRA_ARGS[@]}"
+
+echo "++++++++++++++++++++++++++++++++++++++++"
+echo "Step 1B done: $(date)"
+echo "[DONE] ROW_INDEX=${ROW_INDEX}"
+echo "++++++++++++++++++++++++++++++++++++++++"
