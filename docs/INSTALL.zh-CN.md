@@ -5,15 +5,20 @@
 
 ## 一、git clone 后安装
 
-下面的 `<YOUR-REPOSITORY-URL>` 必须换成你真实的 GitHub 仓库地址。本地改动尚未上传时，远程旧版本不会自动获得这些功能。
+GitHub 仓库：[CujoChenFuyoh/rrmg-fungal-spikein](https://github.com/CujoChenFuyoh/rrmg-fungal-spikein)。
+以下命令使用该仓库的真实地址；尚未提交并推送的本地修改不会出现在 Git URL 安装中。
 
 ```bash
 conda activate fungamr_meta
-git clone <YOUR-REPOSITORY-URL> rrmg-fungal-spikein-github
+git clone https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git rrmg-fungal-spikein-github
 cd rrmg-fungal-spikein-github
 python -m pip install .
 rrmg --version
 ```
+
+`rrmg-fungal-spikein-github` 是这里明确指定的本地克隆目录名，与 GitHub 仓库名不必相同。
+保留这个名字是为了兼容已有 UBDA 配置中的绝对路径；已经有该目录时直接进入使用，不要覆盖重克隆。
+Windows 本地镜像 `E:\github_repo\rrmg-fungal-spikein` 的目录名无需改动，也不要将 Windows 路径填入 Linux 配置。
 
 核心代码安装到当前 Python/Conda 环境，新增 `rrmg` 命令。
 **pip 不安装 BBMap、Java、SPAdes、minimap2、samtools 等外部分析程序**，也不复制参考序列、背景 reads、plan 或结果。已有分析环境直接沿用。
@@ -22,13 +27,25 @@ rrmg --version
 
 ## 二、直接从 GitHub 安装
 
+安装 `main` 分支当前版本：
+
 ```bash
-# 把地址和提交 SHA 换成真实值；目标提交必须已包含 pyproject.toml。
-python -m pip install "git+https://github.com/OWNER/REPOSITORY.git@COMMIT_SHA"
+python -m pip install "git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@main"
 rrmg --version
 ```
 
-可使用已发布的 tag，但完整 commit SHA 更明确。服务器需要 Git 和仓库访问权限。
+为固定实验版本，推荐指定已经验证并推送到该仓库的完整 commit SHA。
+在检出该提交的本地克隆目录中执行：
+
+```bash
+COMMIT_SHA="$(git rev-parse HEAD)"
+python -m pip install "git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@${COMMIT_SHA}"
+```
+
+只使用确实已发布的 tag 或已推送的提交，不假定名为 `v0.2.0` 的 tag 一定存在。
+服务器需要 Git 和仓库访问权限；若仓库是私有的，需先在服务器配置 Git 认证。
+浏览器登录 GitHub 不等于服务器的 Git 已获得权限；不要把访问令牌写进本文或安装 URL。
+`pip install .` 可以安装当前工作区的本地修改；Git URL 只安装远程已经存在的提交。
 本项目目前没有自动发布到 PyPI；不能据此假定 `pip install rrmg-fungal-spikein` 已可从公共索引下载。
 
 无外网服务器可在可联网机器准备 wheel，再复制到服务器：

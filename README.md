@@ -2,6 +2,8 @@
 
 Version: `0.2.0`
 
+Repository: [CujoChenFuyoh/rrmg-fungal-spikein](https://github.com/CujoChenFuyoh/rrmg-fungal-spikein).
+
 This repository simulates paired-end metagenomic reads, inserts a fungal target
 at controlled relative abundances, assembles each permutation, measures target
 gene recovery, and optionally performs one-sample VAMB binning. The reference
@@ -65,21 +67,37 @@ Activate your existing analysis environment, clone the repository, and install:
 
 ```bash
 conda activate fungamr_meta
-git clone <YOUR-REPOSITORY-URL> rrmg-fungal-spikein-github
+git clone https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git rrmg-fungal-spikein-github
 cd rrmg-fungal-spikein-github
 python -m pip install .
 rrmg --version
 ```
 
-Once the packaging changes are pushed, install directly from a real Git URL,
-preferably pinned to a commit:
+The explicit checkout name `rrmg-fungal-spikein-github` preserves the directory
+used in the existing UBDA configuration; it need not match the GitHub repository
+name. If this checkout already exists, use it instead of cloning over it.
+
+Alternatively, install directly from the repository's `main` branch:
 
 ```bash
-python -m pip install "git+https://github.com/OWNER/REPOSITORY.git@COMMIT_SHA"
+python -m pip install "git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@main"
 ```
 
-Replace the example URL/commit. This project has not automatically been published
-to PyPI. pip installs the core code, **not** external bioinformatics programs or
+For reproducible runs, pin a tested commit that has been pushed to this repository.
+Run the following from that commit's local checkout:
+
+```bash
+COMMIT_SHA="$(git rev-parse HEAD)"
+python -m pip install "git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@${COMMIT_SHA}"
+```
+
+Git and repository access are required for Git URL installs. For a private
+repository, authenticate Git on the target machine first; a browser login does
+not automatically authenticate command-line Git. Do not put tokens in these URLs.
+Local, uncommitted edits are only installed with `pip install .`, not by a Git URL.
+
+This project has not automatically been published to PyPI.
+pip installs the core code, **not** external bioinformatics programs or
 input/reference/result data. If you need a new analysis environment, create it
 from the cloned repository first:
 
