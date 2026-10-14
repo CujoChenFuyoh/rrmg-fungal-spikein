@@ -1,6 +1,8 @@
 include VERSION README.md CHANGELOG.md environment.yml .gitattributes .gitignore
 include rrmg_config.example.sh
 include rrmg_run_local.sh rrmg_submit.sh rrmg_preflight.sh
+include rrmg_run_one.sh rrmg_environment.sh
+recursive-include examples *.sh *.pbs *.tsv *.md
 include rrmg_prepare_manifest.py rrmg_download_genomes.sh rrmg_test_randomreadsmg_genomes.sh
 include rrmg_make_plan.py rrmg_make_background_plan.py
 include rrmg_step1_make_background_reads.sh rrmg_step1_background_array.pbs

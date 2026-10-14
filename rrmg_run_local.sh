@@ -4,13 +4,16 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  rrmg_run_local.sh STEP [ROW|START-END] [options]
+  rrmg_submit.sh STEP [ROW|START-END] [options]
+  rrmg_run_local.sh STEP [ROW|START-END] [options]  # compatible alias
 
 STEP:
   step1   background-read simulation
   step2   target-read simulation and merge
   step3   QC, optional Kraken2, assembly, and target-gene mapping
   step3b  one-permutation VAMB binning
+  step4   QC-read to target-gene depth
+  step5   target-only read to target-genome coverage
   step45  optional read-depth and target-genome coverage analyses
 
 Options:
@@ -25,8 +28,8 @@ Examples:
   ./rrmg_run_local.sh step2 215-480 --jobs 4
   ./rrmg_run_local.sh step3 215 --force
 
-This runner does not use qsub. It executes the maintained stage wrappers
-directly, so PBS and non-PBS runs share the same configuration and arguments.
+Activate the analysis environment first. This runner never uses qsub or .pbs
+files. ROW is run_index (bg_index for step1), not Seed or a text line number.
 USAGE
 }
 
@@ -41,7 +44,7 @@ fi
 
 RANGE=""
 CLI_JOBS=""
-FORCE=0
+FORCE=""
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -99,23 +102,18 @@ JOBS="${CLI_JOBS:-${LOCAL_JOBS:-1}}"
 case "$STEP" in
   step1)
     TABLE="${BACKGROUND_PLAN:-temp/rrmg_background/background_plan.tsv}"
-    WRAPPER="rrmg_step1_background_array.pbs"
     ;;
   step2)
     TABLE="${PLAN:-input/rrmg/rrmg_permutation_plan.tsv}"
-    WRAPPER="rrmg_step2_target_merge_array.pbs"
     ;;
   step3)
     TABLE="${PLAN:-input/rrmg/rrmg_permutation_plan.tsv}"
-    WRAPPER="rrmg_step3_downstream_array.pbs"
     ;;
   step3b)
     TABLE="${PLAN:-input/rrmg/rrmg_permutation_plan.tsv}"
-    WRAPPER="rrmg_step3b_vamb_array.pbs"
     ;;
-  step45)
+  step4|step5|step45)
     TABLE="${PLAN:-input/rrmg/rrmg_permutation_plan.tsv}"
-    WRAPPER="rrmg_step4_5_supplementary_downstream_array.pbs"
     ;;
   *)
     echo "[ERROR] Unknown step: $STEP" >&2
@@ -129,31 +127,41 @@ case "$TABLE" in
   *) TABLE="$WD/$TABLE" ;;
 esac
 
-WRAPPER_PATH="$PIPELINE_DIR/$WRAPPER"
+WRAPPER_PATH="$PIPELINE_DIR/rrmg_run_one.sh"
 [[ -s "$TABLE" ]] || { echo "[ERROR] Input table not found: $TABLE" >&2; exit 1; }
 [[ -s "$WRAPPER_PATH" ]] || { echo "[ERROR] Stage wrapper not found: $WRAPPER_PATH" >&2; exit 1; }
 
-ROW_COUNT="$(awk 'NR > 1 {n++} END {print n+0}' "$TABLE")"
-[[ "$ROW_COUNT" -ge 1 ]] || { echo "[ERROR] No data rows in: $TABLE" >&2; exit 1; }
-
-if [[ -z "$RANGE" ]]; then
-  START=1
-  END="$ROW_COUNT"
-elif [[ "$RANGE" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-  START="${BASH_REMATCH[1]}"
-  END="${BASH_REMATCH[2]}"
-elif [[ "$RANGE" =~ ^[0-9]+$ ]]; then
-  START="$RANGE"
-  END="$RANGE"
-else
-  echo "[ERROR] Invalid row selection: $RANGE" >&2
-  exit 1
-fi
-
-if (( START < 1 || END < START || END > ROW_COUNT )); then
-  echo "[ERROR] Invalid row selection ${START}-${END}; valid rows are 1-${ROW_COUNT}" >&2
-  exit 1
-fi
+# Validate explicit IDs before launching anything. Never renumber a subset.
+ROWS_TEXT="$(python3 - "$TABLE" "$STEP" "$RANGE" <<'PY'
+import csv, re, sys
+table, step, selection = sys.argv[1:]
+key = 'bg_index' if step == 'step1' else 'run_index'
+with open(table, newline='') as fh:
+    reader = csv.DictReader(fh, delimiter='\t')
+    if key not in (reader.fieldnames or []):
+        raise SystemExit('[ERROR] Missing index column: ' + key)
+    raw = [r[key] for r in reader]
+if not raw or any(not re.fullmatch(r'[1-9][0-9]*', s or '') for s in raw):
+    raise SystemExit('[ERROR] Plan indices must be positive integers')
+ids = list(map(int, raw))
+if len(ids) != len(set(ids)):
+    raise SystemExit('[ERROR] Duplicate plan indices')
+chosen = ids
+if selection:
+    if not re.fullmatch(r'[1-9][0-9]*(?:-[1-9][0-9]*)?', selection):
+        raise SystemExit('[ERROR] Use ROW or START-END')
+    bounds = list(map(int, selection.split('-')))
+    start, end = bounds[0], bounds[-1]
+    if end < start or end - start + 1 > len(ids):
+        raise SystemExit('[ERROR] Invalid row selection: ' + selection)
+    chosen = list(range(start, end + 1))
+    missing = sorted(set(chosen) - set(ids))
+    if missing:
+        raise SystemExit('[ERROR] Indices absent from plan: ' + str(missing))
+print('\n'.join(map(str, chosen)))
+PY
+)"
+mapfile -t ROWS <<< "$ROWS_TEXT"
 
 RUN_ID="${RRMG_LOCAL_RUN_ID:-local_${STEP}_$(date +%Y%m%d_%H%M%S)_$$}"
 LOG_DIR="${RRMG_LOCAL_LOG_DIR:-$WD/logs/local/$RUN_ID}"
@@ -161,7 +169,7 @@ mkdir -p "$LOG_DIR"
 SUMMARY="$LOG_DIR/summary.tsv"
 printf 'row_index\tstatus\n' > "$SUMMARY"
 
-echo "[LOCAL] step=$STEP rows=${START}-${END} jobs=$JOBS force=$FORCE"
+echo "[LOCAL] step=$STEP selection=${RANGE:-all} rows=${#ROWS[@]} jobs=$JOBS force=${FORCE:-from-config}"
 echo "[LOCAL] table=$TABLE"
 echo "[LOCAL] logs=$LOG_DIR"
 if (( JOBS > 1 )); then
@@ -173,16 +181,14 @@ run_row() {
   echo "[START] step=$STEP row=$row"
   RRMG_CONFIG="$CONFIG" \
   RRMG_ROW_INDEX="$row" \
-  PBS_ARRAY_INDEX="$row" \
-  PBS_JOBID="$RUN_ID" \
   RRMG_LOG_DIR="$LOG_DIR" \
   RRMG_FORCE_OVERRIDE="$FORCE" \
-    bash "$WRAPPER_PATH"
+    bash "$WRAPPER_PATH" "$STEP" "$row" > "$LOG_DIR/row_${row}.log" 2>&1
 }
 
 if (( DRY_RUN == 1 )); then
-  for ((row=START; row<=END; row++)); do
-    printf '[DRY-RUN] row=%d RRMG_CONFIG=%q bash %q\n' "$row" "$CONFIG" "$WRAPPER_PATH"
+  for row in "${ROWS[@]}"; do
+    printf '[DRY-RUN] RRMG_CONFIG=%q bash %q %q %q\n' "$CONFIG" "$WRAPPER_PATH" "$STEP" "$row"
     printf '%s\tDRY_RUN\n' "$row" >> "$SUMMARY"
   done
   echo "[DONE] Dry run completed: $SUMMARY"
@@ -224,7 +230,7 @@ reap_batch() {
   BATCH_ROWS=()
 }
 
-for ((row=START; row<=END; row++)); do
+for row in "${ROWS[@]}"; do
   run_row "$row" &
   PIDS+=("$!")
   BATCH_ROWS+=("$row")

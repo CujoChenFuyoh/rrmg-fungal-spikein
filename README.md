@@ -1,379 +1,305 @@
 # RRMG fungal spike-in permutation workflow
 
-Version: `0.2.0`
+Version: `0.3.0` · [GitHub](https://github.com/CujoChenFuyoh/rrmg-fungal-spikein) · [中文教程](docs/INSTALL.zh-CN.md)
 
-Repository: [CujoChenFuyoh/rrmg-fungal-spikein](https://github.com/CujoChenFuyoh/rrmg-fungal-spikein).
+Simulate a reusable metagenomic background, spike in a fungal target across
+abundance × depth × seed combinations, then perform QC, assembly, gene mapping
+and read coverage analysis. One-sample VAMB binning is optional.
 
-This repository simulates paired-end metagenomic reads, inserts a fungal target
-at controlled relative abundances, assembles each permutation, measures target
-gene recovery, and optionally performs one-sample VAMB binning. The reference
-implementation uses *Aspergillus fumigatus* and CYP51A, but the plan-generation
-scripts accept another target genome and target gene.
+> **Changed in 0.3.0:** `rrmg_submit.sh` now runs selected rows directly. It never
+> calls `qsub` or executes PBS files. Activate your environment first. Scheduling
+> belongs to your own job script; [examples](examples/README.md) cover local,
+> ordinary PBS and PBS arrays. Old qsub options passed to this command are rejected.
 
-The maintained workflow is the split Step 1–5 implementation. It reuses one
-background read set for every abundance × sequencing-depth condition and varies
-only the target reads among permutation seeds.
+> **Scientific limitation:** Step3 writes an empty VCF placeholder and `VarN=0`.
+> It measures gene recovery, NOT validated fungAMR mutation calls. Collectors
+> merge existing results; a successful collection does NOT prove every planned
+> replicate has finished. Read-count semantics are unchanged by this release.
 
-> **Current limitation:** Step 3 measures target-gene presence, alignment
-> identity, and breadth. It writes an empty VCF placeholder and reports
-> `VarN=0`; it does **not** call or annotate fungAMR resistance mutations.
-> Mutation calling must be added as a separately validated stage before these
-> results can be interpreted as AMR genotypes.
+## Workflow and files
 
-## Workflow
+| Stage | Script | Required input | Output |
+|---|---|---|---|
+| Prepare manifest | `rrmg_prepare_manifest.py` | Taxon abundance TSV/CSV | Six-column manifest |
+| Download genomes | `rrmg_download_genomes.sh` | Manifest with taxids | FASTA, downloaded manifest, success/failure lists |
+| Test genomes | `rrmg_test_randomreadsmg_genomes.sh` | Downloaded manifest, FASTA, BBMap | Tested manifest and per-genome test logs |
+| Plan | `rrmg_make_plan.py` | Tested manifest, target genome, design parameters | Permutation plan |
+| Background plan | `rrmg_make_background_plan.py` | Permutation plan, genomes | Background plan, index and per-condition design |
+| step1 | `rrmg_step1_make_background_reads.sh` | Background plan/design, genomes | Reusable background FASTQ pairs |
+| step2 | `rrmg_step2_make_target_and_merge.sh` | Plan, background index/FASTQ, target genome | Target-only reads, mixed reads, merge design |
+| step3 | `rrmg_step3_downstream_analysis.sh` | Mixed reads, gene FASTA | fastp QC, metaSPAdes contigs, contig-to-gene mapping |
+| step4 | `rrmg_step4_reads_to_gene_depth.sh` | Plan/design, QC reads, gene FASTA | Gene depth and coverage summary |
+| step5 | `rrmg_step5_afum_target_reads_genome_cov.sh` | Plan/design, target-only reads, target genome | Genome coverage and optional coverage windows |
+| step45 | `rrmg_step4_5_supplementary_downstream.sh` | Inputs for step4 + step5 | Both supplementary analyses |
+| step3b (optional) | `rrmg_step3b_vamb_binning.sh` | QC reads, contigs, target genome from design | VAMB bins and recovery metrics |
+| Collect | `rrmg_collect_*.py`, `rrmg_collect_supplementary_downstream.sh` | Existing per-run results | Merged TSVs |
 
-| Stage | Purpose | Main program | Input | Principal output |
-|---|---|---|---|---|
-| Prepare | Convert a taxon table to a community manifest | `rrmg_prepare_manifest.py` | Taxon abundance table | `community_manifest.tsv` |
-| Prepare | Download and test reference genomes | `rrmg_download_genomes.sh`, `rrmg_test_randomreadsmg_genomes.sh` | Manifest | Tested manifest and FASTA files |
-| Plan | Expand abundance × depth × seed combinations | `rrmg_make_plan.py` | Tested manifest and target FASTA | `rrmg_permutation_plan.tsv` |
-| Plan | Collapse seed replicates into reusable backgrounds | `rrmg_make_background_plan.py` | Permutation plan | `background_plan.tsv`, `background_index.tsv` |
-| Step 1 | Simulate one background read set per condition | `rrmg_step1_make_background_reads.sh` | Background plan and genomes | Background FASTQ pair |
-| Step 2 | Simulate target reads and concatenate with background | `rrmg_step2_make_target_and_merge.sh` | Plan, background FASTQ, target FASTA | Mixed FASTQ pair and merge design |
-| Step 3 | QC, optional Kraken2, metaSPAdes, contig-to-gene mapping | `rrmg_step3_downstream_analysis.sh` | Mixed FASTQ and target gene | QC reads, contigs, PAF, per-run summary |
-| Step 3B | Bin each permutation independently with VAMB | `rrmg_step3b_vamb_binning.sh` | QC reads, contigs, target genome | VAMB bins and recovery metrics |
-| Step 4/5 | Optional read-to-gene depth and target-genome coverage | `rrmg_step4_5_supplementary_downstream.sh` | Mixed/target-only reads | Depth and coverage summaries |
-| Collect | Merge all per-run results | `rrmg_collect_*.py`, `rrmg_collect_supplementary_downstream.sh` | Plan and per-run outputs | Combined TSV files |
-
-Each permutation keeps the existing directory layout:
+Step5 coverage windows are not metagenomic bins. VAMB is a separate optional step.
+Step3 QC uses **fastp**, not FastQC. Enable Kraken2 only when its database is available.
 
 ```text
-WORK_DIR/
-├── input/rrmg/
-├── ref/
-├── temp/
-│   ├── rrmg_background/
-│   └── rrmg_permutation/<run_id>/
-│       ├── design/
-│       ├── reads/
-│       ├── qc/
-│       ├── kraken/
-│       ├── asm/contigs.fasta
-│       ├── map/
-│       └── binning/
+SpikeIN/
+├── rrmg_config.sh                # private deployment config
+├── input/rrmg/                  # manifests, genomes, permutation plan
+├── ref/                         # target genome and target gene
+├── temp/rrmg_background/        # shared background design, index, reads
+├── temp/rrmg_permutation/<run_id>/
+│   ├── design/
+│   ├── reads/
+│   ├── qc/
+│   ├── asm/contigs.fasta
+│   ├── map/
+│   ├── readmap/
+│   ├── target_readmap/
+│   └── binning/                 # optional VAMB
 ├── result/
-└── logs/pbs/
+└── logs/local/<invocation>/     # row_*.log and summary.tsv (also inside PBS)
 ```
 
-## Installation
+## 1. Install and activate
 
-The workflow targets Linux, GNU Bash, and Python >=3.10. PBS/PBS Pro is optional;
-the same original scripts can run through the local runner without job arrays.
-The `rrmg` command is a thin installation/dispatch layer, not a new analysis engine.
-
-**Chinese migration/installation guide:** [docs/INSTALL.zh-CN.md](docs/INSTALL.zh-CN.md).
-
-Activate your existing analysis environment, clone the repository, and install:
+Linux/Ubuntu (including WSL), Bash and Python >=3.10 are required for analysis.
+Use the existing integrated environment. `datasets`, Java and analysis tools
+are all used from that environment; no separate ncbi_datasets environment is needed.
 
 ```bash
 conda activate fungamr_meta
-git clone https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git rrmg-fungal-spikein-github
-cd rrmg-fungal-spikein-github
+git clone https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git
+cd rrmg-fungal-spikein
+chmod +x rrmg_submit.sh rrmg_run_local.sh
 python -m pip install .
 rrmg --version
 ```
 
-The explicit checkout name `rrmg-fungal-spikein-github` preserves the directory
-used in the existing UBDA configuration; it need not match the GitHub repository
-name. If this checkout already exists, use it instead of cloning over it.
-
-Alternatively, install directly from the repository's `main` branch:
+Or install without a checkout:
 
 ```bash
-python -m pip install "git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@main"
+python -m pip install 'git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@main'
+rrmg init --workdir "$HOME/SpikeIN"
 ```
 
-For reproducible runs, pin a tested commit that has been pushed to this repository.
-Run the following from that commit's local checkout:
+Without `--pipeline-dir`, init exports a versioned `.rrmg/core-0.3.0/` snapshot.
+Existing configs/data are never overwritten. To pin code, replace `main` with
+a tested, pushed commit SHA. Local edits are installed by `pip install .`, not
+a Git URL. This package is not automatically published to PyPI.
+`pip` installs code, not bioinformatics binaries or experimental data.
+If creating a new environment, use `conda env create -f environment.yml` first.
+Save `conda list --explicit` after validation for exact Linux environment reuse.
+
+## 2. Configure a new local project
+
+From the checkout, with `fungamr_meta` active:
 
 ```bash
-COMMIT_SHA="$(git rev-parse HEAD)"
-python -m pip install "git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@${COMMIT_SHA}"
+export CODE="$PWD"
+export WD="$HOME/SpikeIN_local_test"
+rrmg init --workdir "$WD" --pipeline-dir "$CODE"
+export RRMG_CONFIG="$WD/rrmg_config.sh"
+nano "$RRMG_CONFIG"
+mkdir -p "$WD/input/rrmg" "$WD/ref" "$WD/temp" "$WD/result"
+rrmg doctor --config "$RRMG_CONFIG"
 ```
 
-Git and repository access are required for Git URL installs. For a private
-repository, authenticate Git on the target machine first; a browser login does
-not automatically authenticate command-line Git. Do not put tokens in these URLs.
-Local, uncommitted edits are only installed with `pip install .`, not by a Git URL.
+Only `PIPELINE_DIR` and `WD` must be site-specific. Tool overrides normally stay
+empty: Java and `randomreadsmg.sh` resolve from the active PATH. If BBMap is
+installed separately, set `RANDOMREADSMG_SH=/absolute/path/bbmap/randomreadsmg.sh`
+in your private config (or `BBMAP_DIR` for PATH lookup). No environment change is needed.
+Some PBS systems need explicit Java selection; see the commented block in both
+[PBS examples](examples/README.md). Release configs contain no machine's Java path.
 
-This project has not automatically been published to PyPI.
-pip installs the core code, **not** external bioinformatics programs or
-input/reference/result data. If you need a new analysis environment, create it
-from the cloned repository first:
+The default up-to-4 threads / 4g simulation heap / 16 GB SPAdes memory are pilot
+settings, not a guarantee for a large metagenome. Adjust per-row settings to
+your hardware/job allocation, leaving memory overhead. Step2 uses one thread
+by default for seeded simulation reproducibility. `--jobs N` multiplies
+these requirements. Missing future plan/reference files in doctor are warnings;
+missing programs are errors. Doctor does not download inputs.
+
+## 3. Prepare manifest → download genomes → compatibility test
+
+**New experiments only.** For existing results, keep the original manifest, plan,
+IDs, seeds, genomes and background index. Do not recreate them to resume.
+
+Taxon input requires columns `Name`, `NCBI ID`, `NCBI Rank`, `Summed base count`.
+Different column names can be supplied via `rrmg_prepare_manifest.py --help`.
+The included `examples/taxa_demo.tsv` is a two-species demonstration, not research data.
+For real analyses use your own abundance table. Default `--topN` is 30; here it
+is explicitly 2 for the demonstration.
 
 ```bash
-conda env create -f environment.yml
-conda activate fungamr_meta
-python -m pip install .
+source "$RRMG_CONFIG"
+python3 "$PIPELINE_DIR/rrmg_prepare_manifest.py" \
+  --input "$PIPELINE_DIR/examples/taxa_demo.tsv" \
+  --outdir "$WD/input/rrmg" --topN 2 \
+  --target-name 'Aspergillus fumigatus' --target-taxid 330879 \
+  --target-genome-id Afum --target-fasta "$WD/ref/Afum_Af293.fasta"
+
+bash "$PIPELINE_DIR/rrmg_download_genomes.sh" \
+  --manifest "$WD/input/rrmg/community_manifest.tsv" \
+  --out-manifest "$WD/input/rrmg/community_manifest.downloaded.tsv"
+
+# Inspect before continuing; successful background downloads are renormalized.
+cat "$WD/input/rrmg/download_failed.tsv"
+test -s "$WD/ref/Afum_Af293.fasta"
+
+# Export only tool resolution settings for this direct utility invocation.
+source "$PIPELINE_DIR/rrmg_environment.sh"
+bash "$PIPELINE_DIR/rrmg_test_randomreadsmg_genomes.sh" \
+  --manifest "$WD/input/rrmg/community_manifest.downloaded.tsv" \
+  --out-manifest "$WD/input/rrmg/community_manifest.tested.tsv" \
+  -w "$WD" --test-pairs 200 --readlen 150 --seed 999
 ```
 
-`environment.yml` is intentionally human-readable. For a frozen Linux build,
-export the exact tested package set and commit it with the release:
+The manifest columns are `genome_ID name taxid rel_abund fasta role` (TSV).
+The target row has `role=target` and abundance 0; its spike level is set in the plan.
+The Af293 example uses the [strain taxid 330879](https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=330879).
+A species-level taxid alone is not a promise of a particular strain. Keep
+existing experimental IDs unchanged when resuming; audit reference identity separately.
+
+The downloader uses [NCBI datasets](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/download/genome/datasets_download_genome_taxon/)
+from PATH. It reuses non-empty FASTA files, tries reference genomes first, then
+complete/chromosome/scaffold/contig packages. It chooses one assembly per row
+from the package; fallback packages can contain many assemblies and be large.
+`--threads` is currently a compatibility option, not download parallelism.
+Diagnostics are saved in `input/rrmg/download_logs/`; failed target downloads
+stop the command. Inspect failed background rows and the genome-test summary
+before accepting the renormalized community. Preserve downloaded FASTA checksums
+and NCBI assembly reports (`--keep-tmp`) to freeze references for a real study.
+The target gene FASTA is **not** extracted by this downloader: provide your
+validated `ref/CYP51A_wt.fasta` before Step3/4.
+
+## 4. Create plans
+
+These are **small pilot settings**, not the original 480-row design.
+Use a separate work directory for the pilot; never overwrite an existing plan.
 
 ```bash
-conda list -n fungamr_meta --explicit > conda-linux-64.lock
-# Recreate it later with:
-conda create -n fungamr_meta --file conda-linux-64.lock
-```
-
-## Configuration
-
-Existing project/configuration? Keep it; no initialization or plan regeneration is needed:
-
-```bash
-export RRMG_CONFIG=/path/to/rrmg_config.sh
-rrmg run step2 451-455 --jobs 1 --dry-run
-# Run analysis only on allocated compute resources:
-rrmg run step2 451-455 --jobs 1
-```
-
-For a new site config bound to a cloned repository:
-
-```bash
-rrmg init --workdir /path/to/SpikeIN --pipeline-dir "$PWD" --env fungamr_meta
-rrmg doctor --workdir /path/to/SpikeIN
-```
-
-Without `--pipeline-dir`, `init` exports the original core scripts to a versioned
-`.rrmg/core-0.2.0/` directory inside the project and pins the new config to it.
-No input data or existing config is replaced; unresolved software paths are
-marked `/EDIT_ME/`. Review paths and resources before analysis.
-`rrmg export /path/to/new_core` copies core scripts and a SHA-256 manifest to a new
-directory. `rrmg path` prints the installed script location. Neither command
-copies sequencing data or installs external tools.
-
-The original manual configuration and Bash entry points remain supported:
-
-Machine-specific paths are not stored in PBS files. Create one local config:
-
-```bash
-cp rrmg_config.example.sh rrmg_config.sh
-nano rrmg_config.sh
-```
-
-Set at least:
-
-- `PIPELINE_DIR`: this cloned repository;
-- `WD`: working directory containing `input/`, `ref/`, `temp/`, and `result/`;
-- `CONDA_SH` and `RRMG_CONDA_ENV`;
-- `RANDOMREADSMG_SH`, `JAVA_HOME`, and `JAVA_BIN`;
-- reference and Kraken2 paths as required.
-
-The private `rrmg_config.sh` is ignored by Git. Verify the installation before
-submitting expensive jobs:
-
-```bash
-bash rrmg_preflight.sh
-```
-
-The `#PBS -l` resource declarations remain in each PBS wrapper because PBS
-reads directives before Bash can load the config. If thread or memory values
-are changed in `rrmg_config.sh`, submit matching PBS resources with `qsub -l`
-or update the wrapper deliberately.
-
-## Required inputs
-
-The canonical community manifest has six tab-separated columns:
-
-```text
-genome_ID  name  taxid  rel_abund  fasta  role
-```
-
-`role` is `background` or `target`. Keep the target row in the manifest with
-`rel_abund=0`; the actual target abundance is specified when creating the
-permutation plan.
-
-At minimum, provide:
-
-- a tested community manifest and all referenced genome FASTA files;
-- the target genome FASTA;
-- the target-gene FASTA;
-- a Kraken2 database only when `RUN_KRAKEN=1`.
-
-For a new experimental design, generate a plan from recorded parameters so every
-run has a unique `run_index` and `run_id`. For migration/resumption, retain the
-existing plan and identities; audit old absolute paths instead of regenerating
-the experiment merely because its code was installed on a new server.
-
-## Create plans
-
-Run commands from the code repository after loading the local configuration:
-
-```bash
-source rrmg_config.sh
-source "$CONDA_SH"
-conda activate "$RRMG_CONDA_ENV"
-mkdir -p "$WD/input/rrmg" "$WD/temp" "$WD/result" "$WD/logs/pbs"
-
-python3 rrmg_make_plan.py \
+python3 "$PIPELINE_DIR/rrmg_make_plan.py" \
   --manifest "$WD/input/rrmg/community_manifest.tested.tsv" \
   --out "$WD/input/rrmg/rrmg_permutation_plan.tsv" \
-  --sample-prefix AirMG_Afum \
-  --target-name "Aspergillus fumigatus" \
-  --target-taxid 746128 \
-  --target-genome-id Afum \
-  --target-fasta "$WD/ref/Afum_Af293.fasta" \
-  --target-abundances "0.005,0.01,0.02" \
-  --total-pairs "10000000,25000000,50000000" \
-  --seeds "1-100" \
-  --readlen 150
+  --sample-prefix Pilot_Afum \
+  --target-name 'Aspergillus fumigatus' --target-taxid 330879 \
+  --target-genome-id Afum --target-fasta "$WD/ref/Afum_Af293.fasta" \
+  --target-abundances '0.01' --total-pairs '1000000' --seeds '1-2' --readlen 150
 
-python3 rrmg_make_background_plan.py \
+python3 "$PIPELINE_DIR/rrmg_make_background_plan.py" \
   --plan "$WD/input/rrmg/rrmg_permutation_plan.tsv" \
-  -w "$WD" \
-  --outdir "$WD/temp/rrmg_background" \
-  --background-seed 1000
+  -w "$WD" --outdir "$WD/temp/rrmg_background" --background-seed 1000
 ```
 
-The numerical values above are examples. Record the values used for each
-analysis in a release, methods document, or checked-in small design file.
+This design yields one shared background condition and two permutation rows.
+A low-depth pilot tests execution, not expected CYP51A recovery.
+Record the actual FASTQ pair counts, tool versions and design parameters before
+scaling up; the runner does not certify the simulator's read-count semantics.
+Some RandomReadsMG releases interpret `reads=N` per contig rather than per
+genome. For multi-contig targets compare Step5 `TargetPairsFastq` with
+`TargetPairsDesign`; do not assume designed and realized abundances are equal.
+This release does not silently change the simulation model for existing studies.
 
-## Run with PBS
+## 5. Run directly (no PBS)
 
-`rrmg_submit.sh` calculates array bounds from the current plan, so stale
-hard-coded `#PBS -J` ranges are not used:
+Activate the environment once, then run stages in order. No extra for-loop is
+needed for a contiguous range.
 
 ```bash
-./rrmg_submit.sh step1
-# Wait for Step 1 to finish successfully.
-./rrmg_submit.sh step2
-# Wait for Step 2.
-./rrmg_submit.sh step3
-# Wait for Step 3 assemblies.
-./rrmg_submit.sh step3b
-
-# Optional supplementary analyses:
-./rrmg_submit.sh step45
+conda activate fungamr_meta
+cd "$PIPELINE_DIR"
+bash ./rrmg_submit.sh step1
+bash ./rrmg_submit.sh step2 1-2
+bash ./rrmg_submit.sh step3 1-2
+bash ./rrmg_submit.sh step4 1-2
+bash ./rrmg_submit.sh step5 1-2
+# step45 1-2 is equivalent to step4 followed by step5 for each row.
+# Optional, after QC and assembly: bash ./rrmg_submit.sh step3b 1-2
 ```
 
-Submit a selected range when recovering failed rows:
+After `chmod +x rrmg_submit.sh`, `./rrmg_submit.sh step2 1-100` is identical.
+`rrmg run step2 1-100 --config /path/config.sh` and `rrmg_run_local.sh` remain supported.
+Selection is the original `run_index`, or **bg_index for step1**; it is not
+Seed, target-species ID or a text line number including the header. A single
+integer runs exactly one row. Omitted range runs all IDs in that stage's table.
+Missing/duplicate IDs fail before launch; sparse tables retain original IDs.
 
 ```bash
-./rrmg_submit.sh step2 215-480
+bash ./rrmg_submit.sh step2 409-480 --dry-run
+bash ./rrmg_submit.sh step2 409-480 --jobs 1
+bash ./rrmg_submit.sh step2 225-230 --jobs 1
+# Explicit replacement, only after inspecting the selected rows:
+# bash ./rrmg_submit.sh step2 409-480 --force
 ```
 
-Extra PBS options are passed through after the optional range:
+Do not run overlapping invocations on the same stage/row or regenerate a
+background while another job consumes it. Wait for upstream completion.
+Dry-run validates the selection and dispatcher, not all FASTQ/reference inputs.
+Per-invocation `logs/local/.../summary.tsv` records OK/FAILED and per-row logs.
+Any row failure causes nonzero final exit; other selected rows are still attempted.
+On an unscheduled remote machine use tmux/screen for long runs. On an HPC
+cluster run analysis on allocated compute nodes, not the login node.
+
+## 6. Ordinary PBS or PBS array
+
+Copy and adapt [examples/pbs.pbs](examples/pbs.pbs) or
+[examples/pbs_array.pbs](examples/pbs_array.pbs); these are not site-ready jobs.
+They activate `fungamr_meta`, optionally select Java and call the same runner.
 
 ```bash
-./rrmg_submit.sh step3 1-300 -W depend=afterok:12345
+# Ordinary job: its body runs step2 1-100 sequentially.
+qsub -v RRMG_STAGE=step2,RRMG_ROWS=1-100 examples/pbs.pbs
+# Array-capable PBS Pro: each array task runs ONE original row.
+qsub -J 1-100 -v RRMG_STAGE=step2 examples/pbs_array.pbs
 ```
 
-Do not submit a downstream stage until its required upstream outputs are
-complete. Job IDs and plan rows should be recorded with the analysis metadata.
+In an array the command is `rrmg_submit.sh step2 "$PBS_ARRAY_INDEX"`,
+**never** `step2 "1-$PBS_ARRAY_INDEX"`. Torque may use `-t` and `PBS_ARRAYID`;
+the example accepts either variable. Edit queue/account/resource syntax for
+your site; array limits/concurrency controls vary. Match ranges to bg_index
+for step1, run_index for other stages. Root-level legacy `*_array.pbs` files
+remain optional compatibility examples and are not used by the core.
+Do not submit all stages together without validated dependencies.
 
-## Run without PBS
+## 7. Resume, collect and preserve results
 
-`rrmg_run_local.sh` runs the same maintained stage wrappers directly and does
-not call `qsub`. Run one stage at a time and wait for it to finish before
-starting its downstream stage:
-
-```bash
-bash rrmg_run_local.sh step1
-bash rrmg_run_local.sh step2
-bash rrmg_run_local.sh step3
-bash rrmg_run_local.sh step3b
-
-# Optional supplementary analyses:
-bash rrmg_run_local.sh step45
-```
-
-Select one plan row or a range in the same way as for PBS arrays:
+Defaults reuse outputs according to the existing stage checks (often non-empty
+files, not checksums). Step3 writes STEP3_SUCCESS after mapping/summary completion;
+Step3B uses VAMB_SUCCESS. Step4/5 reuse per-run summaries. Keep target-only
+reads (`STEP2_KEEP_TARGET_READS=1`) until Step5. Nothing in the new runner
+automatically deletes reads. `--force` replaces selected outputs and can
+remove assembly/binning directories; use only for inspected rows.
 
 ```bash
-bash rrmg_run_local.sh step2 215
-bash rrmg_run_local.sh step2 215-480
-```
-
-The default is one row at a time. Limited parallel execution is available,
-but every simultaneous row uses the full per-row CPU and memory settings:
-
-```bash
-bash rrmg_run_local.sh step2 215-480 --jobs 4
-bash rrmg_run_local.sh step3 215-220 --jobs 1
-```
-
-Use `--dry-run` to validate the range without starting analysis. Use `--force`
-only after inspecting the selected rows; it overrides the corresponding force
-setting from `rrmg_config.sh` for that invocation:
-
-```bash
-bash rrmg_run_local.sh step2 215-220 --dry-run
-bash rrmg_run_local.sh step2 215-220 --force
-```
-
-Each invocation writes a status table and per-row logs under
-`$WD/logs/local/<run_id>/`. The command returns a non-zero exit status when any
-row fails and prints the failed row numbers. On a server without a scheduler,
-run long commands inside `tmux` or `screen` so they survive an SSH disconnect.
-
-## Resume and replacement behavior
-
-- Step 1 skips a background when both background FASTQ files are non-empty.
-- Step 2 skips a run when both mixed FASTQ files are non-empty.
-- Step 3 reuses existing QC, Kraken2, and assembly outputs and writes
-  `STEP3_SUCCESS` only after mapping and summary update finish.
-- Step 3B skips a run only when both `VAMB_SUCCESS` and its summary exist.
-- Step 4/5 skip completed per-run summaries.
-- Force flags are disabled in `rrmg_config.example.sh`. Enable a force setting
-  only for inspected rows because replacement can remove an incomplete
-  assembly or VAMB directory.
-
-`--skip-assemble` means reuse a non-empty existing `asm/contigs.fasta`; it never
-creates or truncates that file.
-
-## Collect results
-
-After all relevant arrays finish:
-
-```bash
-source rrmg_config.sh
-
+source "$RRMG_CONFIG"
 python3 "$PIPELINE_DIR/rrmg_collect_map_results.py" \
   --summary "$WD/result/rrmg_split_pipeline_summary.tsv" \
   --plan "$WD/input/rrmg/rrmg_permutation_plan.tsv" \
   --root "$WD/temp/rrmg_permutation" \
-  --out "$WD/result/rrmg_target_gene_map_merged.tsv" \
-  --wd "$WD"
-
-python3 "$PIPELINE_DIR/rrmg_collect_vamb_results.py" \
-  --plan "$WD/input/rrmg/rrmg_permutation_plan.tsv" \
-  --root "$WD/temp/rrmg_permutation" \
-  --out "$WD/result/rrmg_vamb_per_run.tsv" \
-  --wd "$WD"
-
+  --out "$WD/result/rrmg_target_gene_map_merged.tsv" --wd "$WD"
 bash "$PIPELINE_DIR/rrmg_collect_supplementary_downstream.sh" \
   "$WD" "$WD/temp/rrmg_permutation"
+# Only if VAMB was run:
+# python3 "$PIPELINE_DIR/rrmg_collect_vamb_results.py" \
+#   --plan "$WD/input/rrmg/rrmg_permutation_plan.tsv" \
+#   --root "$WD/temp/rrmg_permutation" \
+#   --out "$WD/result/rrmg_vamb_per_run.tsv" --wd "$WD"
 ```
 
-## Reproducibility and data safety
+Partial cohorts can be collected. Compare IDs and missing fields against the plan
+before plotting; absent output is not biological zero. Back up depth/window files
+as well as merged summaries if figures require them. No VAMB output is required
+for a reads/contigs-only report.
 
-- Commit code, small manifests, plan-generation parameters, configuration
-  examples, environment specifications, and checksums—not FASTQ/BAM/FASTA data.
-- Keep reference databases and large outputs in managed storage and record
-  their version, acquisition date, and SHA-256 checksum.
-- Tag every tested release, for example `v0.1.0`; do not silently edit a tag.
-- Save the exact Conda explicit lock from the validated Linux environment.
-- Back up final assemblies and result tables outside temporary/ephemeral space.
-- Run the included GitHub Actions syntax checks on every push and pull request.
-
-Local syntax checks:
+## Testing and reproducibility
 
 ```bash
-python3 -m compileall -q .
-find . -type f \( -name '*.sh' -o -name '*.pbs' \) -print0 \
-  | xargs -0 -n1 bash -n
-
-# Lightweight dispatcher tests; no bioinformatics programs or real qsub run.
+python -m unittest discover -s tests -p 'test_*.py' -v
 bash tests/smoke_test_local_runner.sh
+python -m compileall -q .
+find . -type f \( -name '*.sh' -o -name '*.pbs' \) -print0 | xargs -0 -n1 bash -n
+python -m pip wheel --no-deps . -w dist
+python tests/check_installed_wheel.py dist/*.whl
 ```
 
-## Repository scope
-
-Historical code snapshots, the old monolithic runner, compatibility Step 4
-wrappers, runtime results, references, and local configuration are retained on
-the author's workstation but excluded from Git by `.gitignore`. The canonical
-public interface is the split workflow documented here.
-
-Before making the repository public, select an appropriate software license
-(for example MIT, BSD-3-Clause, or GPL-3.0) and add author/contact and citation
-information. No license is chosen automatically by this repository.
+Tests use temporary synthetic fixtures/mocks, not real scheduler submissions.
+Keep code, environment locks, small design templates and reference checksums
+in version control; keep FASTA/FASTQ/BAM/results in managed data storage.
+Pin a verified commit and do not update code/config during active runs.
+Choose an appropriate license before distributing under an open-source license;
+this update does not select one for the author.

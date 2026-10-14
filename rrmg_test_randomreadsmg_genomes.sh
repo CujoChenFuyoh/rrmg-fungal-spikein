@@ -48,7 +48,8 @@ done
 
 : "${MANIFEST:?Missing --manifest}"
 : "${OUT_MANIFEST:?Missing --out-manifest}"
-: "${RANDOMREADSMG_SH:?RANDOMREADSMG_SH is not set}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rrmg_environment.sh"
+: "${RANDOMREADSMG_SH:?randomreadsmg.sh missing from PATH; set RANDOMREADSMG_SH}"
 
 WD="$(mkdir -p "$WD" && cd "$WD" && pwd)"
 cd "$WD"
@@ -113,7 +114,7 @@ for i, row in enumerate(rows, 1):
     if not fa.exists():
         reason = "FASTA_NOT_FOUND"
     else:
-        cmd = ["bash", rrmg, "ref={}".format(str(fa)), "out={}".format(str(out1)), "out2={}".format(str(out2)), "reads={}".format(test_pairs), "paired=t", "minlength={}".format(readlen), "maxlength={}".format(readlen), "seed={}".format(base_seed + i)]
+        cmd = ["bash", rrmg, "-Xmx" + os.environ.get("BBMAP_XMX", "2g"), "t=" + os.environ.get("THREADS", "1"), "overwrite=t", "ref={}".format(str(fa)), "out={}".format(str(out1)), "out2={}".format(str(out2)), "reads={}".format(test_pairs), "paired=t", "minlength={}".format(readlen), "maxlength={}".format(readlen), "seed={}".format(base_seed + i)]
         with log.open("w") as lfh:
             ret = subprocess.call(cmd, stdout=lfh, stderr=lfh)
         if ret == 0 and out1.exists() and out1.stat().st_size > 0 and out2.exists() and out2.stat().st_size > 0:

@@ -1,6 +1,6 @@
-#!/bin/bash
-# PBS wrapper for one downstream plan row. Site paths and runtime parameters
-# are read from rrmg_config.sh. Submit through rrmg_submit.sh.
+#!/usr/bin/env bash
+# Legacy convenience example, not used by the core runner.
+# Adapt resource directives to your scheduler; prefer examples/pbs*.pbs.
 #PBS -N rrmg_downstream
 #PBS -l walltime=72:00:00
 #PBS -l select=1:ncpus=64:mem=450gb
@@ -8,86 +8,13 @@
 #PBS -S /bin/bash
 
 set -euo pipefail
-
-CONFIG="${RRMG_CONFIG:-${PBS_O_WORKDIR:-$PWD}/rrmg_config.sh}"
-[[ -r "$CONFIG" ]] || { echo "[ERROR] Configuration not found: $CONFIG" >&2; exit 1; }
-# shellcheck disable=SC1090
-source "$CONFIG"
-
-: "${WD:?Set WD in $CONFIG}"
-: "${PIPELINE_DIR:?Set PIPELINE_DIR in $CONFIG}"
-: "${CONDA_SH:?Set CONDA_SH in $CONFIG}"
-: "${RRMG_CONDA_ENV:?Set RRMG_CONDA_ENV in $CONFIG}"
-
-PLAN="${PLAN:-input/rrmg/rrmg_permutation_plan.tsv}"
-GENE_REF="${GENE_REF:-ref/CYP51A_wt.fasta}"
-KRAKEN_DB="${KRAKEN_DB:-}"
-RUN_KRAKEN="${RUN_KRAKEN:-0}"
-THREADS="${STEP3_THREADS:-64}"
-SPADES_MEM_GB="${STEP3_SPADES_MEM_GB:-450}"
-PHRED_OFFSET="${STEP3_PHRED_OFFSET:-33}"
-ROW_INDEX="${PBS_ARRAY_INDEX:-${RRMG_ROW_INDEX:-}}"
-[[ "$ROW_INDEX" =~ ^[0-9]+$ ]] || { echo "[ERROR] Missing/invalid array row index: ${ROW_INDEX:-unset}" >&2; exit 1; }
-
-cd "$WD"
-LOG_DIR="${RRMG_LOG_DIR:-logs/pbs}"
-mkdir -p "$LOG_DIR"
-
-exec > >(tee -a "$LOG_DIR/step3_downstream_${PBS_JOBID:-manual}.${PBS_ARRAY_INDEX:-manual}.log") 2>&1
-
-echo "++++++++++++++++++++++++++++++++++++++++"
-echo "Step 3: downstream analysis"
-echo "Host            : $(hostname)"
-echo "PBS_JOBID       : ${PBS_JOBID:-NA}"
-echo "PBS_ARRAY_INDEX : ${PBS_ARRAY_INDEX:-NA}"
-echo "ROW_INDEX       : $ROW_INDEX"
-echo "CONFIG          : $CONFIG"
-echo "WD              : $WD"
-echo "Start time      : $(date)"
-echo "++++++++++++++++++++++++++++++++++++++++"
-
-source "$CONDA_SH"
-export CONDA_SH
-export RRMG_CONDA_ENV
-conda activate "$RRMG_CONDA_ENV"
-[[ -s "$PLAN" ]] || { echo "[ERROR] Missing plan: $PLAN"; exit 1; }
-[[ -s "$GENE_REF" ]] || { echo "[ERROR] Missing gene reference: $GENE_REF"; exit 1; }
-STEP_SCRIPT="${PIPELINE_DIR}/rrmg_step3_downstream_analysis.sh"
-[[ -s "$STEP_SCRIPT" ]] || { echo "[ERROR] Missing script: $STEP_SCRIPT"; exit 1; }
-
-KRAKEN_ARGS=(--skip-kraken)
-if [[ "$RUN_KRAKEN" -eq 1 ]]; then
-  [[ -d "$KRAKEN_DB" ]] || { echo "[ERROR] Missing Kraken2 DB directory: $KRAKEN_DB"; exit 1; }
-  KRAKEN_ARGS=(--db "$KRAKEN_DB")
+export RRMG_CONFIG="${RRMG_CONFIG:-${PBS_O_WORKDIR:-$PWD}/rrmg_config.sh}"
+source "$RRMG_CONFIG"
+# Optional compatibility with older configs; otherwise activate before calling.
+if [[ -n "${CONDA_SH:-}" ]]; then
+  source "$CONDA_SH"
+  conda activate "${RRMG_CONDA_ENV:-fungamr_meta}"
 fi
-
-EXTRA_ARGS=()
-[[ "${STEP3_SKIP_QC:-0}" -eq 1 ]] && EXTRA_ARGS+=(--skip-qc)
-[[ "${STEP3_SKIP_ASSEMBLY:-0}" -eq 1 ]] && EXTRA_ARGS+=(--skip-assemble)
-[[ "${RRMG_FORCE_OVERRIDE:-${STEP3_FORCE:-0}}" -eq 1 ]] && EXTRA_ARGS+=(--force)
-
-echo "[INFO] PLAN          : $PLAN"
-echo "[INFO] GENE_REF      : $GENE_REF"
-echo "[INFO] KRAKEN_DB     : $KRAKEN_DB"
-echo "[INFO] RUN_KRAKEN    : $RUN_KRAKEN"
-echo "[INFO] THREADS       : $THREADS"
-echo "[INFO] SPADES_MEM_GB : $SPADES_MEM_GB"
-echo "[INFO] PHRED_OFFSET  : $PHRED_OFFSET"
-echo "[INFO] python3       : $(command -v python3 || true)"
-python3 --version || true
-
-bash "$STEP_SCRIPT" \
-  "$PLAN" \
-  "$ROW_INDEX" \
-  -w "$WD" \
-  -gene "$GENE_REF" \
-  "${KRAKEN_ARGS[@]}" \
-  -t "$THREADS" \
-  -mem "$SPADES_MEM_GB" \
-  --phred-offset "$PHRED_OFFSET" \
-  "${EXTRA_ARGS[@]}"
-
-echo "++++++++++++++++++++++++++++++++++++++++"
-echo "Step 3 done: $(date)"
-echo "[DONE] ROW_INDEX=${ROW_INDEX}"
-echo "++++++++++++++++++++++++++++++++++++++++"
+ROW="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-${RRMG_ROW_INDEX:-}}}"
+[[ "$ROW" =~ ^[1-9][0-9]*$ ]] || { echo '[ERROR] Set a single original row index' >&2; exit 1; }
+exec bash "$PIPELINE_DIR/rrmg_submit.sh" step3 "$ROW" --jobs 1

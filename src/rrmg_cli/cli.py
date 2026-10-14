@@ -13,7 +13,7 @@ import sys
 
 from . import __version__
 
-STEPS = ("step1", "step2", "step3", "step3b", "step45")
+STEPS = ("step1", "step2", "step3", "step3b", "step4", "step5", "step45")
 
 
 def core_names():
@@ -83,22 +83,20 @@ def detected_settings(args):
                 conda_sh = str(candidate)
         except (OSError, subprocess.SubprocessError):
             pass
+    # Defaults stay portable: resolve active PATH at runtime, not at installation.
+    # Explicit overrides are local deployment choices, never release defaults.
     randomreads = args.randomreadsmg
     if not randomreads and args.bbmap_dir:
-        candidate = Path(args.bbmap_dir).expanduser() / "randomreadsmg.sh"
-        if candidate.is_file():
-            randomreads = str(candidate)
-    randomreads = randomreads or shutil.which("randomreadsmg.sh")
+        randomreads = str(Path(args.bbmap_dir).expanduser() / "randomreadsmg.sh")
     bbmap = args.bbmap_dir or (str(Path(randomreads).resolve().parent) if randomreads else None)
-    java = args.java_bin or shutil.which("java")
-    java_home = str(Path(java).resolve().parent.parent) if java else None
+    java = args.java_bin
     settings = {
-        "CONDA_SH": resolved(conda_sh) if conda_sh else "/EDIT_ME/conda/etc/profile.d/conda.sh",
+        "CONDA_SH": resolved(conda_sh) if conda_sh else "",
         "RRMG_CONDA_ENV": args.env,
-        "BBMAP_DIR": resolved(bbmap) if bbmap else "/EDIT_ME/bbmap",
-        "RANDOMREADSMG_SH": resolved(randomreads) if randomreads else "/EDIT_ME/bbmap/randomreadsmg.sh",
-        "JAVA_HOME": java_home or "/EDIT_ME/java",
-        "JAVA_BIN": resolved(java) if java else "/EDIT_ME/java/bin/java",
+        "BBMAP_DIR": resolved(bbmap) if bbmap else "",
+        "RANDOMREADSMG_SH": resolved(randomreads) if randomreads else "",
+        "JAVA_HOME": str(Path(java).resolve().parent.parent) if java else "",
+        "JAVA_BIN": resolved(java) if java else "",
     }
     return settings
 
@@ -121,6 +119,9 @@ def init_project(args):
     settings.update(PIPELINE_DIR=str(pipeline), WD=str(wd))
     template = (core_root() / "rrmg_config.example.sh").read_text(encoding="utf-8")
     for key, value in settings.items():
+        if key in ("JAVA_BIN", "JAVA_HOME", "BBMAP_DIR", "RANDOMREADSMG_SH") and not value:
+            # Preserve template inheritance so PBS-job exports remain effective.
+            continue
         if "\n" in value or "\r" in value:
             raise ValueError("Newlines not allowed in configuration paths/names")
         template, n = re.subn(r"^" + key + r"=.*$", lambda _: key + "=" + shlex.quote(value), template, flags=re.M)

@@ -113,7 +113,7 @@ def main():
             pipeline = root / "mock pipeline"
             pipeline.mkdir()
             (pipeline / "rrmg_run_local.sh").write_bytes((export / "rrmg_run_local.sh").read_bytes())
-            wrapper = pipeline / "rrmg_step2_target_merge_array.pbs"
+            wrapper = pipeline / "rrmg_run_one.sh"
             wrapper.write_text('#!/bin/bash\nprintf "%s\\n" "$RRMG_ROW_INDEX" >> "$TEST_CALLS"\n')
             plan = wd / "plan.tsv"
             plan.write_text("run_index\trun_id\n1\trun1\n2\trun2\n3\trun3\n")

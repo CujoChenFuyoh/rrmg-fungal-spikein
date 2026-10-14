@@ -1,204 +1,196 @@
-# 安装与迁移：继续使用原 RRMG 流程
+# 安装、从零准备输入与跨服务器运行
 
-0.2.0 只增加安装和命令行入口。`rrmg run` 实际执行原来的
-`rrmg_run_local.sh`；样品目录、分析步骤和 plan 不变。不需要之前的续跑补充包。
+版本 0.3.0。样品目录、实验 plan 和分析主体保持原结构；本次改变的是调度入口和软件路径解析。
 
-## 一、git clone 后安装
+**重要变化：`rrmg_submit.sh` 不再递交 PBS，而是直接运行任务。**
+激活环境后运行 `./rrmg_submit.sh step2 1-100`，默认顺序处理原 plan 中的 run_index 1–100。
+不要在 HPC 登录节点直接执行重分析；把同一句命令放进自己的 PBS 作业。
+本地入口不再执行 `.pbs` 文件，也不再生成假的 PBS 环境变量。
 
-GitHub 仓库：[CujoChenFuyoh/rrmg-fungal-spikein](https://github.com/CujoChenFuyoh/rrmg-fungal-spikein)。
-以下命令使用该仓库的真实地址；尚未提交并推送的本地修改不会出现在 Git URL 安装中。
+## 1. 安装和配置
 
 ```bash
 conda activate fungamr_meta
-git clone https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git rrmg-fungal-spikein-github
-cd rrmg-fungal-spikein-github
+git clone https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git
+cd rrmg-fungal-spikein
+chmod +x rrmg_submit.sh rrmg_run_local.sh
 python -m pip install .
 rrmg --version
+export CODE="$PWD"
+export WD="$HOME/SpikeIN_local_test"
+rrmg init --workdir "$WD" --pipeline-dir "$CODE"
+export RRMG_CONFIG="$WD/rrmg_config.sh"
+nano "$RRMG_CONFIG"
+mkdir -p "$WD/input/rrmg" "$WD/ref" "$WD/temp" "$WD/result"
+rrmg doctor --config "$RRMG_CONFIG"
 ```
 
-`rrmg-fungal-spikein-github` 是这里明确指定的本地克隆目录名，与 GitHub 仓库名不必相同。
-保留这个名字是为了兼容已有 UBDA 配置中的绝对路径；已经有该目录时直接进入使用，不要覆盖重克隆。
-Windows 本地镜像 `E:\github_repo\rrmg-fungal-spikein` 的目录名无需改动，也不要将 Windows 路径填入 Linux 配置。
-
-核心代码安装到当前 Python/Conda 环境，新增 `rrmg` 命令。
-**pip 不安装 BBMap、Java、SPAdes、minimap2、samtools 等外部分析程序**，也不复制参考序列、背景 reads、plan 或结果。已有分析环境直接沿用。
-
-如果没有环境，先从克隆目录运行 `conda env create -f environment.yml`，再激活并执行 `python -m pip install .`。Conda YAML 不是精确版本锁；验证环境后保存 `conda list --explicit`。
-
-## 二、直接从 GitHub 安装
-
-安装 `main` 分支当前版本：
+已有克隆目录时不要覆盖重克隆。已有配置时不要再次 init，直接指定 `RRMG_CONFIG`。
+pip 只安装流程代码，不安装分析工具，也不复制实验输入。也可从 Git URL 安装：
 
 ```bash
-python -m pip install "git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@main"
-rrmg --version
+python -m pip install 'git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@main'
+rrmg init --workdir /path/to/SpikeIN
 ```
 
-为固定实验版本，推荐指定已经验证并推送到该仓库的完整 commit SHA。
-在检出该提交的本地克隆目录中执行：
+不指定 `--pipeline-dir` 时，核心代码冻结到 `.rrmg/core-0.3.0/`，防止以后的 pip 升级悄悄替换当前实验代码。
+Git URL 只能安装已经推送的代码；本地改动使用 `pip install .`。
+可用 `rrmg export /path/to/new_core` 导出带校验清单的核心代码和 examples；不会覆盖已有目录。
+离线安装可先 `python -m pip wheel --no-deps . -w dist`，复制 wheel 后用 `pip install --no-index --no-deps 文件.whl`。
+正式分析固定已推送的 commit SHA 和测试过的 Conda explicit lock。
+
+## 2. 一个环境，路径由使用环境决定
+
+`fungamr_meta` 内已有 datasets、Java 和分析软件时，不另建下载环境。下载器直接调用 PATH 中的 `datasets`，
+Step3 也直接调用当前环境中的 fastp、SPAdes 和 minimap2，不再反复 `conda run`。
+配置里的 Java/BBMap 路径默认留空；发行版不固定任何电脑的路径。
 
 ```bash
-COMMIT_SHA="$(git rev-parse HEAD)"
-python -m pip install "git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.git@${COMMIT_SHA}"
+command -v datasets
+datasets version
+command -v java
+readlink -f "$(command -v java)"
+java -version
+command -v randomreadsmg.sh
 ```
 
-只使用确实已发布的 tag 或已推送的提交，不假定名为 `v0.2.0` 的 tag 一定存在。
-服务器需要 Git 和仓库访问权限；若仓库是私有的，需先在服务器配置 Git 认证。
-浏览器登录 GitHub 不等于服务器的 Git 已获得权限；不要把访问令牌写进本文或安装 URL。
-`pip install .` 可以安装当前工作区的本地修改；Git URL 只安装远程已经存在的提交。
-本项目目前没有自动发布到 PyPI；不能据此假定 `pip install rrmg-fungal-spikein` 已可从公共索引下载。
-
-无外网服务器可在可联网机器准备 wheel，再复制到服务器：
+如果 BBMap 是另行安装、没有进入 PATH，可在私有配置中填写：
 
 ```bash
-python -m pip wheel --no-deps . -w dist
-# 复制 dist/rrmg_fungal_spikein-0.2.0-py3-none-any.whl 到服务器，然后：
-python -m pip install --no-index --no-deps rrmg_fungal_spikein-0.2.0-py3-none-any.whl
+RANDOMREADSMG_SH="/absolute/path/bbmap/randomreadsmg.sh"
 ```
 
-这只是纯 Python 安装/调度代码的 wheel，不包含分析软件二进制。
+BBMap 目录需包含配套的 Java class 和辅助脚本；不能只复制一个 randomreadsmg.sh。
+部分 PBS 系统需要在作业脚本中显式指定 Java。这个例外写在
+[普通 PBS](../examples/pbs.pbs) 和 [PBS array](../examples/pbs_array.pbs) 的注释示例里，
+放在 `conda activate` **之后**，按真实环境解析 `bin/java` 的符号链接；通常无需启用。
+没有把任何机构特定路径写进发行版。
 
-## 三、已有工作目录和配置：不需要 init
+默认配置为小规模试跑：一般每任务 4 线程，Step2 为固定 seed 可重复性默认 1 线程，模拟 Java heap 4g、SPAdes 16 GB。
+真实宏基因组可能需要更多资源，按作业申请调整。`--jobs 4` 会叠加四份资源，不是共用四线程。
+doctor 只做工具/基础路径检查，不证明样品数据完整；尚未生成的 plan/reference 会提示 warning。
 
-例如 UBDA 已经有原数据和配置：
+## 3. Prepare manifest → 下载 genome
+
+下面只用于**新的独立试跑目录**。已有实验不要重新生成 manifest/plan 或更改 ID/随机种子。
+示例背景表是两个物种的演示数据，不代表原始研究群落。实际分析改成你的物种丰度表。
+输入列为 `Name`、`NCBI ID`、`NCBI Rank`、`Summed base count`；
+可用 prepare 脚本的 `--help` 查看自定义列名参数。
+
+```bash
+source "$RRMG_CONFIG"
+python3 "$PIPELINE_DIR/rrmg_prepare_manifest.py" \
+  --input "$PIPELINE_DIR/examples/taxa_demo.tsv" \
+  --outdir "$WD/input/rrmg" --topN 2 \
+  --target-name 'Aspergillus fumigatus' --target-taxid 330879 \
+  --target-genome-id Afum --target-fasta "$WD/ref/Afum_Af293.fasta"
+
+bash "$PIPELINE_DIR/rrmg_download_genomes.sh" \
+  --manifest "$WD/input/rrmg/community_manifest.tsv" \
+  --out-manifest "$WD/input/rrmg/community_manifest.downloaded.tsv"
+
+cat "$WD/input/rrmg/download_failed.tsv"
+test -s "$WD/ref/Afum_Af293.fasta"
+```
+
+manifest 的六列是 `genome_ID name taxid rel_abund fasta role`，实际以 Tab 分隔。
+目标行先为 `role=target, rel_abund=0`，spike 比例在生成 plan 时指定。
+新示例用 [Af293 菌株 taxid 330879](https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=330879)；
+不能仅凭物种层级 taxid 就保证下载的是指定菌株。已有实验仍保留原 ID，单独核对参考序列身份。
+下载器复用已有非空 FASTA；优先 reference，否则按组装级别回退。回退包可能包含很多 genome，
+不是保证每次仅下载一个。`--threads` 目前不实现并行下载。
+失败诊断在 `download_logs/`；背景下载失败会剔除并重新归一化，必须先审核失败列表。
+目标下载失败会报错。正式分析保留 `--keep-tmp` 的 assembly report、FASTA 和 SHA-256。
+目标基因 `ref/CYP51A_wt.fasta` 必须另行提供并验证，本下载器不自动提取 CYP51A。
+
+## 4. 测试 genome 与生成小规模 plan
+
+```bash
+source "$PIPELINE_DIR/rrmg_environment.sh"
+bash "$PIPELINE_DIR/rrmg_test_randomreadsmg_genomes.sh" \
+  --manifest "$WD/input/rrmg/community_manifest.downloaded.tsv" \
+  --out-manifest "$WD/input/rrmg/community_manifest.tested.tsv" \
+  -w "$WD" --test-pairs 200 --readlen 150 --seed 999
+
+python3 "$PIPELINE_DIR/rrmg_make_plan.py" \
+  --manifest "$WD/input/rrmg/community_manifest.tested.tsv" \
+  --out "$WD/input/rrmg/rrmg_permutation_plan.tsv" \
+  --sample-prefix Pilot_Afum \
+  --target-name 'Aspergillus fumigatus' --target-taxid 330879 \
+  --target-genome-id Afum --target-fasta "$WD/ref/Afum_Af293.fasta" \
+  --target-abundances '0.01' --total-pairs '1000000' --seeds '1-2' --readlen 150
+
+python3 "$PIPELINE_DIR/rrmg_make_background_plan.py" \
+  --plan "$WD/input/rrmg/rrmg_permutation_plan.tsv" \
+  -w "$WD" --outdir "$WD/temp/rrmg_background" --background-seed 1000
+```
+
+结果是 1 个背景条件、2 个 permutation。兼容性测试会剔除失败背景并归一化；
+先核对 `randomreadsmg_genome_test/` 下的 summary/log，再决定是否接受群落变化。
+低深度用于检查能否执行，不要求一定检出目标基因。扩大规模前核对 FASTQ 实际对数、工具版本和参考基因组。
+本更新没有修正历史 reads 数量异常，也没有改变随机种子和 abundance 语义。
+部分 RandomReadsMG 版本把 `reads=N` 解释为每个 contig 的 reads 数，而不是整个 genome 的总数。
+多 contig 目标尤其要核对 Step5 的 `TargetPairsFastq` 与 `TargetPairsDesign`，不能直接把设计丰度当作实际丰度。
+
+## 5. 相同入口用于直接运行、普通 PBS 和 array
 
 ```bash
 conda activate fungamr_meta
-export RRMG_CONFIG=/ubda/home/23124109r/rrmg-fungal-spikein-github/rrmg_config.sh
-
-# 只检查任务范围/入口；不运行分析。
-rrmg run step2 451-455 --jobs 1 --dry-run
-
-# 以下分析命令应在计算节点或普通 PBS 作业中运行。
-rrmg run step2 451-455 --jobs 1
-rrmg run step3 451-455 --jobs 1
-rrmg run step45 451-455 --jobs 1
+cd "$PIPELINE_DIR"
+./rrmg_submit.sh step1
+./rrmg_submit.sh step2 1-2
+./rrmg_submit.sh step3 1-2
+./rrmg_submit.sh step4 1-2
+./rrmg_submit.sh step5 1-2
+# 或在 Step3 后用 step45 1-2 一起做 Step4/5。
+# 可选：./rrmg_submit.sh step3b 1-2
 ```
 
-行号只是示例，换成实际未完成的 `run_index`。原入口要求保留完整、连续编号的 plan；不要剪出几行后重新编号。不是 `Seed`，也不是包含表头的文本行号。
+step1 的数字是 background plan 的 `bg_index`，其他步骤是原 permutation plan 的 `run_index`。
+不是 Seed、目标物种 ID，也不是包含表头的文件行号。单数字只跑一个 ID，省略则跑表中全部 ID。
+支持保留原编号的子集表；不自动重新编号。任何缺失/重复 ID 在开始计算前报错。
+`--dry-run` 只验证选择范围和入口，不会检查所有 FASTQ 是否完整。
+`rrmg_run_local.sh` 和 `rrmg run` 仍可用；三者共用同一核心分发逻辑。
 
-也可以显式指定配置：
-
-```bash
-rrmg run step3 451 --config /path/to/rrmg_config.sh --jobs 1
-```
-
-配置优先级：`--config` → `RRMG_CONFIG` → `--workdir/rrmg_config.sh` → 当前目录的 `rrmg_config.sh`。
-若设置了 `RRMG_CONFIG`，它会优先于 `--workdir`；切换项目时推荐显式 `--config`。
-`run` 和 `doctor` 使用该配置的 `PIPELINE_DIR`，所以不会绕过你选定的原代码版本。
-
-## 四、新环境：只初始化部署配置，不重建实验
-
-先激活目标分析环境，让工具路径自动检测来自正确环境。
-
-### 继续绑定现有 GitHub 克隆目录
+普通 PBS 示例的计算部分是：
 
 ```bash
-rrmg init \
-  --workdir /ubda/home/23124109r/SpikeIN \
-  --pipeline-dir /ubda/home/23124109r/rrmg-fungal-spikein-github \
-  --env fungamr_meta
-```
-
-只新增工作目录下的 `rrmg_config.sh`。原 plan、背景、reads 和 assembly 不变。
-已存在配置时拒绝覆盖，直接使用已有配置；也可用 `--config /path/new_config.sh` 明确创建另一份配置。
-
-### 没有单独的代码克隆目录（从 Git URL 或 wheel 安装）
-
-```bash
-rrmg init --workdir /path/to/SpikeIN --env fungamr_meta
-```
-
-会把**原始核心脚本**复制到工作目录的 `.rrmg/core-0.2.0/`，写配置指向它，并生成 `rrmg_core_manifest.json`。
-这不是另一套分析流程，只是冻结当前脚本副本，防止以后 pip 升级悄悄替换当前项目的核心代码。
-初始化中断留下的目录不会自动删除或覆盖；检查完整性后可用 `--pipeline-dir` 显式绑定。
-
-自动检测不到的软件路径会写成 `/EDIT_ME/...` 并提示。检查配置中的全部路径和资源参数后再运行：
-
-```bash
-rrmg doctor --workdir /path/to/SpikeIN
-```
-
-可以在初始化时显式提供路径：
-
-```bash
-rrmg init --workdir /path/to/SpikeIN \
-  --conda-sh /path/to/conda/etc/profile.d/conda.sh \
-  --bbmap-dir /path/to/bbmap \
-  --randomreadsmg /path/to/bbmap/randomreadsmg.sh \
-  --java-bin /path/to/java/bin/java
-```
-
-`doctor` 仍调用原 preflight：它检查工具和基本文件，不代表 reads 完整、实验设计正确或所有分析已完成。
-配置是可执行 Bash 文件，只加载你信任的配置。
-
-## 五、需要一份可直接复制的核心脚本
-
-```bash
-rrmg export /path/to/new_rrmg_core
-```
-
-输出原来的 `.sh`、`.pbs`、`.py`、配置模板、环境文件、说明和 SHA-256 清单。
-已有目标目录会被拒绝，避免混入不同版本的脚本；不提供批量覆盖选项。
-这份导出是运行脚本集合，不是新的 Git 仓库或可再次 `pip install .` 的源码发行包；需要安装源码时使用 git clone 或源码压缩包。
-
-导出以后仍可按旧方式运行：
-
-```bash
-export RRMG_CONFIG=/path/to/SpikeIN/rrmg_config.sh
-bash /path/to/new_rrmg_core/rrmg_run_local.sh step2 451-455
-```
-
-相应配置的 `PIPELINE_DIR` 必须指向这一份代码。只移动代码目录，不会自动改写配置里的旧绝对路径。
-
-## 六、不支持 array 的服务器
-
-`rrmg run` 永远调用本地入口，不执行 qsub。可直接放在已有普通 PBS 脚本中：
-
-```bash
-# 放在已有普通 PBS 作业的计算部分；保留站点验证过的资源头。
-source /path/to/conda/etc/profile.d/conda.sh
 conda activate fungamr_meta
-export RRMG_CONFIG=/path/to/rrmg_config.sh
-
-for ROW in 451 452 453; do
-    rrmg run step2 "$ROW" --jobs 1 || exit 1
-    rrmg run step3 "$ROW" --jobs 1 || exit 1
-    rrmg run step45 "$ROW" --jobs 1 || exit 1
-done
+./rrmg_submit.sh step2 1-100 --jobs 1
 ```
 
-原 `rrmg_submit.sh` 仍是 **array 提交器**，不适用于不支持 array 的服务器。
-脚本名称包含 `_array.pbs` 不影响本地模式：本地入口用 Bash 执行它，PBS 注释头不会被调度器解析。
-每个样品的线程/内存由配置控制，普通 PBS 请求必须匹配；增大 `--jobs` 会叠加资源需求。
-
-## 七、规划与汇总工具
-
-保留所有原命令，也可从安装包调用：
+支持 array 时，每个子任务只运行自己的 ID：
 
 ```bash
-rrmg path
-rrmg script rrmg_make_plan.py -- --help
-rrmg script rrmg_collect_map_results.py -- --help
-
-# 读取现有结果并输出原来的 result/ 汇总表：
-rrmg script rrmg_collect_supplementary_downstream.sh -- /path/to/SpikeIN
+ROW="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-}}"
+./rrmg_submit.sh step2 "$ROW" --jobs 1
 ```
 
-`script` 使用当前安装包的工具，不自动加载项目配置或激活环境；工具参数和输出覆盖行为与原脚本相同。
-对于已固定旧代码版本的项目，应按需直接调用该项目 `PIPELINE_DIR` 下的工具。
-补充汇总脚本已修复代码目录与数据目录分开时找不到 Python collector 的问题。
+**不能写成 `1-$ROW`**，否则每个 array 子任务都会重复处理前面样品。
+完整头部、环境初始化、可选 Java 设置和提交命令见 [examples/README.md](../examples/README.md)。
+PBS 的 queue/account/resource 语法由用户按服务器调整，核心流程没有固定 PBS 要求。
+旧根目录 `_array.pbs` 只保留为兼容示例；新本地入口不再依赖它们。
 
-## 八、迁移与升级边界
+## 6. 继续旧实验、汇总和备份
 
-- pip/clone 解决代码分发，不能代替迁移 FASTA、背景 FASTQ、plan 和已有结果。
-- 表格里的 `/rds/...` 等旧绝对路径仍需核对，不自动重建 plan 或修改随机种子。
-- 原 Step3/Step45 的输入检查、结果复用规则和 `--force` 行为没有改变。
-- 不假定全部已完成；收集器仍只汇总找到的结果，样品完整性需对照 plan。
-- Step3 的 `VarN=0` 仍是占位，并非完成 fungAMR 突变检测；已有 reads 数量异常也没有在此安装更新中修正。
-- 推荐固定代码提交和已验证的 Conda lock。不要在作业运行期间 `pip install --upgrade`、`git pull` 或修改配置。
-- 默认快照不会自动升级；绑定 Git checkout 的项目会受到后续 checkout 修改影响。
-- native Windows 可安装、导出、初始化、查看帮助；完整分析要在 Linux/WSL 上运行。
+```bash
+conda activate fungamr_meta
+export RRMG_CONFIG=/path/to/existing/rrmg_config.sh
+rrmg run step2 409-480 --dry-run
+rrmg run step2 409-480 --jobs 1
+rrmg run step2 225-230 --jobs 1
+# 相应完成后，按同样范围运行 step3，再 step45。
+```
 
-打包遵循 [setuptools 包内数据支持](https://setuptools.pypa.io/en/stable/userguide/datafiles.html) 和
-[pip Git 安装方式](https://pip.pypa.io/en/stable/topics/vcs-support/)。项目没有新增许可证授权，公开分享前请由维护者自行选择合适许可证。
+原输入、背景 FASTQ/index、plan 中的绝对路径仍需有效，clone/pip 不会迁移这些数据。
+旧配置的 `/EDIT_ME/` 或失效 Java 路径需清空或修正；在调用前主动激活环境。
+保留 `STEP2_KEEP_TARGET_READS=1` 供 Step5 使用。不要同时操作同一个样品，或重建仍被消费的背景。
+默认沿用各步骤原有复用条件；`--force` 才显式重跑，可能删除指定样品已有 assembly/binning。
+每次执行都有 `logs/local/.../summary.tsv` 和 `row_N.log`，部分失败时继续尝试其余选定样品，最终返回非零。
+Step3 是 fastp QC，不是 FastQC；Step5 的 coverage bins 不是 VAMB genome bins。
+Step3 的空 VCF/`VarN=0` 仍是占位，不能当作完成 fungAMR 突变检测。
+
+绘图输入收集命令见 [README 的 Collect 部分](../README.md#7-resume-collect-and-preserve-results)。
+无需全部重复结束才能收集，但必须对照 plan 核对缺失 ID，不能把缺失当零。
+只做 reads/contigs 时不用等 VAMB；按图需要额外备份 per-base depth 和 genome coverage window 表。
+不要在任务运行期间升级代码或更改配置。

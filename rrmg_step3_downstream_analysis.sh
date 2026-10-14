@@ -50,17 +50,7 @@ SKIP_ASSEMBLE=0
 FORCE=0
 PHRED_OFFSET=33
 
-# Conda environment:
-#   The analysis tools used here (fastp, kraken2, metaSPAdes, minimap2,
-#   samtools/paftools if needed) are expected to live in one integrated
-#   environment.  Keep the per-tool variables only as optional expert
-#   overrides for unusual installations.
-RRMG_CONDA_ENV="${RRMG_CONDA_ENV:-fungamr_meta}"
-ENV_FASTP="${ENV_FASTP:-$RRMG_CONDA_ENV}"
-ENV_SPADES="${ENV_SPADES:-$RRMG_CONDA_ENV}"
-ENV_SAMTOOLS="${ENV_SAMTOOLS:-$RRMG_CONDA_ENV}"
-ENV_MINIMAP2="${ENV_MINIMAP2:-$RRMG_CONDA_ENV}"
-ENV_KRAKEN2="${ENV_KRAKEN2:-$RRMG_CONDA_ENV}"
+# Resolve analysis programs from the caller's active environment/PATH.
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -87,20 +77,6 @@ cd "$WD"
 [[ -s "$PLAN" ]] || { echo "[ERROR] Plan not found: $PLAN" >&2; exit 1; }
 if [[ -z "$KRAKEN_DB" ]]; then SKIP_KRAKEN=1; fi
 
-conda_run() {
-  local env="$1"; shift
-  if [[ -n "${CONDA_SH:-}" && -f "$CONDA_SH" ]]; then
-    # shellcheck disable=SC1090
-    source "$CONDA_SH"
-  elif [[ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
-    # shellcheck disable=SC1091
-    source "$HOME/miniconda3/etc/profile.d/conda.sh"
-  else
-    echo "[ERROR] conda.sh not found; set CONDA_SH" >&2; exit 1
-  fi
-  conda run -n "$env" "$@"
-}
-
 merge_intervals_cov_bp() {
   sort -k1,1n -k2,2n | awk 'BEGIN{cov=0;s=-1;e=-1} NR==1{s=$1;e=$2;next} {if($1<=e){if($2>e)e=$2}else{cov+=(e-s);s=$1;e=$2}} END{if(s!=-1)cov+=(e-s);print cov}'
 }
@@ -118,21 +94,21 @@ kraken2_species_abundance() {
 run_fastp() {
   local in1="$1" in2="$2" out1="$3" out2="$4" js="$5" ht="$6"
   mkdir -p "$(dirname "$out1")" "$(dirname "$out2")"
-  conda_run "$ENV_FASTP" fastp -w "$THREADS" -i "$in1" -I "$in2" -o "$out1" -O "$out2" -j "$js" -h "$ht" 2> "${out1}.fastp.log"
+  fastp -w "$THREADS" -i "$in1" -I "$in2" -o "$out1" -O "$out2" -j "$js" -h "$ht" 2> "${out1}.fastp.log"
   [[ -s "$out1" && -s "$out2" ]] || { echo "[ERROR] fastp failed: ${out1}.fastp.log" >&2; exit 1; }
 }
 
 run_kraken2() {
   local in1="$1" in2="$2" rpt="$3" out="$4"
   mkdir -p "$(dirname "$rpt")" "$(dirname "$out")"
-  conda_run "$ENV_KRAKEN2" kraken2 --db "$KRAKEN_DB" --paired "$in1" "$in2" --threads "$THREADS" --use-names --report-zero-counts --memory-mapping --report "$rpt" --output "$out" > "${out}.kraken2.log" 2>&1
+  kraken2 --db "$KRAKEN_DB" --paired "$in1" "$in2" --threads "$THREADS" --use-names --report-zero-counts --memory-mapping --report "$rpt" --output "$out" > "${out}.kraken2.log" 2>&1
   [[ -s "$rpt" ]] || { echo "[ERROR] kraken2 failed: ${out}.kraken2.log" >&2; exit 1; }
 }
 
 run_metaspades() {
   local in1="$1" in2="$2" outdir="$3"
   mkdir -p "$outdir"
-  conda_run "$ENV_SPADES" metaspades.py -t "$THREADS" -m "$SPADES_MEM_GB" --phred-offset "$PHRED_OFFSET" -1 "$in1" -2 "$in2" -o "$outdir" 2> "${outdir}/metaspades.log"
+  metaspades.py -t "$THREADS" -m "$SPADES_MEM_GB" --phred-offset "$PHRED_OFFSET" -1 "$in1" -2 "$in2" -o "$outdir" 2> "${outdir}/metaspades.log"
   [[ -s "${outdir}/contigs.fasta" ]] || { echo "[ERROR] metaSPAdes failed: ${outdir}/metaspades.log" >&2; exit 1; }
 }
 
@@ -140,7 +116,7 @@ contigs_to_target_summary() {
   local sid="$1" contigs="$2" target="$3" ttype="$4" out="$5"
   if [[ ! -s "$contigs" || ! -s "$target" ]]; then echo -e "${sid}\t${ttype}\t${target}\t${contigs}\tN\t0\t0\t0\t0\tNA\t0" >> "$out"; return 0; fi
   local paf="${contigs}.to_${ttype}.paf" vcf="${contigs}.to_${ttype}.vcf"
-  conda_run "$ENV_MINIMAP2" minimap2 -t "$THREADS" -x asm5 "$target" "$contigs" > "$paf" 2> "${paf}.minimap2.log"
+  minimap2 -t "$THREADS" -x asm5 "$target" "$contigs" > "$paf" 2> "${paf}.minimap2.log"
   if [[ ! -s "$paf" ]]; then echo -e "${sid}\t${ttype}\t${target}\t${contigs}\tN\t0\t0\t0\t0\t${vcf}\t0" >> "$out"; return 0; fi
   local best_line best_alnlen best_ident target_len covbp breadth varn
   best_line=$(awk 'BEGIN{best=0} $12>=20{if($11>best){best=$11;line=$0}} END{print line}' "$paf")

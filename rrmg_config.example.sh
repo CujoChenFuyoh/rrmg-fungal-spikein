@@ -10,15 +10,18 @@ PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Working directory containing input/, ref/, temp/, result/, and logs/.
 WD="/absolute/path/to/SpikeIN"
 
-# One integrated Conda environment containing all analysis programs.
-CONDA_SH="${HOME}/miniconda3/etc/profile.d/conda.sh"
+# Activate fungamr_meta BEFORE running this workflow. All tools, including
+# datasets and Java, use that environment's PATH; no second environment needed.
+# CONDA_SH / RRMG_CONDA_ENV are optional conveniences for PBS examples only.
+CONDA_SH=""
 RRMG_CONDA_ENV="fungamr_meta"
 
-# RandomReadsMG/BBMap and Java. Use absolute paths.
-BBMAP_DIR="/absolute/path/to/bbmap"
-RANDOMREADSMG_SH="${BBMAP_DIR}/randomreadsmg.sh"
-JAVA_HOME="/absolute/path/to/java"
-JAVA_BIN="${JAVA_HOME}/bin/java"
+# Optional tool overrides. Normally leave empty (auto-resolve from active PATH).
+# A separately installed BBMap can be selected without changing environments.
+BBMAP_DIR="${BBMAP_DIR:-}"
+RANDOMREADSMG_SH="${RANDOMREADSMG_SH:-}"
+JAVA_HOME="${JAVA_HOME:-}"
+JAVA_BIN="${JAVA_BIN:-}"
 
 # Paths below may be absolute or relative to WD.
 PLAN="input/rrmg/rrmg_permutation_plan.tsv"
@@ -31,27 +34,31 @@ TARGET_GENOME="ref/Afum_Af293.fasta"
 RUN_KRAKEN=0
 KRAKEN_DB="/absolute/path/to/kraken2_database"
 
-# Runtime parameters. Keep these consistent with the PBS resource requests.
+# Conservative pilot defaults, NOT guaranteed sufficient for a full metagenome.
+# Increase for real datasets and match your allocation (heap/memory + overhead).
 # Non-PBS runs default to one row at a time. Increase only after accounting for
 # each row's thread and memory settings below.
 LOCAL_JOBS=1
 
-STEP1_THREADS=8
-STEP1_BBMAP_XMX="32g"
+STEP1_THREADS=4
+STEP1_BBMAP_XMX="4g"
 BACKGROUND_SEED=1000
 STEP1_FORCE=0
 
+# One thread keeps target simulation deterministic with a fixed BBMap seed.
+STEP2_THREADS=1
+STEP2_BBMAP_XMX="4g"
 STEP2_KEEP_TARGET_READS=1
 STEP2_FORCE=0
 
-STEP3_THREADS=64
-STEP3_SPADES_MEM_GB=450
+STEP3_THREADS=4
+STEP3_SPADES_MEM_GB=16
 STEP3_PHRED_OFFSET=33
 STEP3_SKIP_QC=0
 STEP3_SKIP_ASSEMBLY=0
 STEP3_FORCE=0
 
-STEP3B_THREADS=32
+STEP3B_THREADS=4
 VAMB_MIN_CONTIG=2000
 VAMB_MIN_BIN_SIZE=200000
 VAMB_SEED=42
@@ -59,7 +66,7 @@ VAMB_COMMAND="vamb"
 VAMB_USE_CUDA=0
 VAMB_FORCE=0
 
-STEP45_THREADS=8
+STEP45_THREADS=4
 STEP45_BIN_SIZE=10000
 STEP45_MAKE_BINS=1
 STEP45_FORCE=0

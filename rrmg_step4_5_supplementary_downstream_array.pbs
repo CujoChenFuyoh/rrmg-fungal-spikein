@@ -1,8 +1,6 @@
-#!/bin/bash
-# Optional PBS wrapper combining:
-#   A) mixed/QC metagenome reads -> CYP51A depth
-#   B) retained target-only reads -> Afum whole-genome coverage
-# Site paths and runtime parameters are read from rrmg_config.sh.
+#!/usr/bin/env bash
+# Legacy convenience example, not used by the core runner.
+# Adapt resource directives to your scheduler; prefer examples/pbs*.pbs.
 #PBS -N rrmg_supp_downstream
 #PBS -l walltime=24:00:00
 #PBS -l select=1:ncpus=8:mem=32gb
@@ -10,75 +8,13 @@
 #PBS -S /bin/bash
 
 set -euo pipefail
-
-CONFIG="${RRMG_CONFIG:-${PBS_O_WORKDIR:-$PWD}/rrmg_config.sh}"
-[[ -r "$CONFIG" ]] || { echo "[ERROR] Configuration not found: $CONFIG" >&2; exit 1; }
-# shellcheck disable=SC1090
-source "$CONFIG"
-
-: "${WD:?Set WD in $CONFIG}"
-: "${PIPELINE_DIR:?Set PIPELINE_DIR in $CONFIG}"
-: "${CONDA_SH:?Set CONDA_SH in $CONFIG}"
-: "${RRMG_CONDA_ENV:?Set RRMG_CONDA_ENV in $CONFIG}"
-
-PLAN="${PLAN:-input/rrmg/rrmg_permutation_plan.tsv}"
-GENE_REF="${GENE_REF:-ref/CYP51A_wt.fasta}"
-TARGET_GENOME="${TARGET_GENOME:-ref/Afum_Af293.fasta}"
-THREADS="${STEP45_THREADS:-8}"
-BIN_SIZE="${STEP45_BIN_SIZE:-10000}"
-MINIMAP2_BIN="${MINIMAP2_BIN:-minimap2}"
-SAMTOOLS_BIN="${SAMTOOLS_BIN:-samtools}"
-ROW_INDEX="${PBS_ARRAY_INDEX:-${RRMG_ROW_INDEX:-}}"
-[[ "$ROW_INDEX" =~ ^[0-9]+$ ]] || { echo "[ERROR] Missing/invalid array row index: ${ROW_INDEX:-unset}" >&2; exit 1; }
-
-cd "$WD"
-LOG_DIR="${RRMG_LOG_DIR:-logs/pbs}"
-mkdir -p "$LOG_DIR"
-
-exec > >(tee -a "$LOG_DIR/supp_downstream_${PBS_JOBID:-manual}.${ROW_INDEX}.log") 2>&1
-
-echo "++++++++++++++++++++++++++++++++++++++++"
-echo "Supplementary downstream: read-to-gene + target-genome coverage"
-echo "Host            : $(hostname)"
-echo "PBS_JOBID       : ${PBS_JOBID:-NA}"
-echo "PBS_ARRAY_INDEX : ${PBS_ARRAY_INDEX:-NA}"
-echo "ROW_INDEX       : ${ROW_INDEX}"
-echo "CONFIG          : $CONFIG"
-echo "WD              : $WD"
-echo "Start time      : $(date)"
-echo "++++++++++++++++++++++++++++++++++++++++"
-
-source "$CONDA_SH"
-export RRMG_CONDA_ENV
-conda activate "$RRMG_CONDA_ENV"
-export THREADS
-export MINIMAP2_BIN
-export SAMTOOLS_BIN
-export READS_TO_GENE_SCRIPT="${PIPELINE_DIR}/rrmg_step4_reads_to_gene_depth.sh"
-export TARGET_GENOME_COV_SCRIPT="${PIPELINE_DIR}/rrmg_step5_afum_target_reads_genome_cov.sh"
-
-[[ -s "$PLAN" ]] || { echo "[ERROR] Missing plan: $PLAN"; exit 1; }
-[[ -s "$GENE_REF" ]] || { echo "[ERROR] Missing gene reference: $GENE_REF"; exit 1; }
-[[ -s "$TARGET_GENOME" ]] || { echo "[ERROR] Missing target genome: $TARGET_GENOME"; exit 1; }
-
-STEP_SCRIPT="${PIPELINE_DIR}/rrmg_step4_5_supplementary_downstream.sh"
-[[ -s "$STEP_SCRIPT" ]] || { echo "[ERROR] Missing script: $STEP_SCRIPT"; exit 1; }
-[[ -s "$READS_TO_GENE_SCRIPT" ]] || { echo "[ERROR] Missing script: $READS_TO_GENE_SCRIPT"; exit 1; }
-[[ -s "$TARGET_GENOME_COV_SCRIPT" ]] || { echo "[ERROR] Missing script: $TARGET_GENOME_COV_SCRIPT"; exit 1; }
-
-EXTRA_ARGS=()
-[[ "${STEP45_MAKE_BINS:-1}" -eq 1 ]] && EXTRA_ARGS+=(--make-bins --bin-size "$BIN_SIZE")
-[[ "${RRMG_FORCE_OVERRIDE:-${STEP45_FORCE:-0}}" -eq 1 ]] && EXTRA_ARGS+=(--force)
-
-bash "$STEP_SCRIPT" \
-  "$PLAN" \
-  "$ROW_INDEX" \
-  -w "$WD" \
-  -gene "$GENE_REF" \
-  --target-genome "$TARGET_GENOME" \
-  "${EXTRA_ARGS[@]}"
-
-echo "++++++++++++++++++++++++++++++++++++++++"
-echo "Supplementary downstream done: $(date)"
-echo "[DONE] ROW_INDEX=${ROW_INDEX}"
-echo "++++++++++++++++++++++++++++++++++++++++"
+export RRMG_CONFIG="${RRMG_CONFIG:-${PBS_O_WORKDIR:-$PWD}/rrmg_config.sh}"
+source "$RRMG_CONFIG"
+# Optional compatibility with older configs; otherwise activate before calling.
+if [[ -n "${CONDA_SH:-}" ]]; then
+  source "$CONDA_SH"
+  conda activate "${RRMG_CONDA_ENV:-fungamr_meta}"
+fi
+ROW="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-${RRMG_ROW_INDEX:-}}}"
+[[ "$ROW" =~ ^[1-9][0-9]*$ ]] || { echo '[ERROR] Set a single original row index' >&2; exit 1; }
+exec bash "$PIPELINE_DIR/rrmg_submit.sh" step45 "$ROW" --jobs 1

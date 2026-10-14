@@ -75,7 +75,7 @@ SUCCESS_LIST="${SUCCESS_LIST:-${BASE_DIR}/download_success.tsv}"
 FAIL_LIST="${FAIL_LIST:-${BASE_DIR}/download_failed.tsv}"
 NORMALIZED_INPUT="${TMP_DIR}/manifest.normalized.tsv"
 
-mkdir -p "$GENOME_DIR" "$TMP_DIR"
+mkdir -p "$GENOME_DIR" "$TMP_DIR" "$BASE_DIR/download_logs"
 
 command -v datasets >/dev/null 2>&1 || { echo "[ERROR] 'datasets' not found in PATH" >&2; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "[ERROR] 'unzip' not found in PATH" >&2; exit 1; }
@@ -126,16 +126,16 @@ if not rows:
     raise SystemExit("[ERROR] Empty manifest")
 
 with out.open("w", newline="") as fh:
-    w = csv.writer(fh, delimiter="\t")
+    w = csv.writer(fh, delimiter="\t", lineterminator="\n")
     w.writerow(["genome_ID", "name", "taxid", "rel_abund", "fasta", "role"])
     for i, r in enumerate(rows, start=1):
         gid = pick(r, ["genome_ID", "genome", "id"]) or f"Genome{i}"
         gid = safe_id(gid)
         name = pick(r, ["name", "Name", "species", "taxon"]) or gid
-        taxid = pick(r, ["taxid", "NCBI ID", "NCBI_ID", "TaxID"])
-        rel = pick(r, ["rel_abund", "relative_abundance", "abundance", "rel"], "0")
+        taxid = pick(r, ["taxid", "NCBI ID", "NCBI_ID", "TaxID"]).strip() or "NA"
+        rel = pick(r, ["rel_abund", "relative_abundance", "abundance", "rel"], "0").strip() or "0"
         fasta = pick(r, ["fasta", "path_to_fasta_file", "genome_path", "path"])
-        role = pick(r, ["role"], "background") or "background"
+        role = (pick(r, ["role"], "background") or "background").strip().lower()
         if not fasta:
             fasta = str(genome_dir / f"{gid}.fna")
         w.writerow([gid, name, taxid, rel, fasta, role])
@@ -157,13 +157,13 @@ download_one_package () {
       --reference \
       --include genome \
       --filename "$zipfile" \
-      >/dev/null 2>&1
+      >"$BASE_DIR/download_logs/$(basename "$zipfile").log" 2>&1
   else
     datasets download genome taxon "$taxid" \
       --assembly-level "$level" \
       --include genome \
       --filename "$zipfile" \
-      >/dev/null 2>&1
+      >"$BASE_DIR/download_logs/$(basename "$zipfile").log" 2>&1
   fi
 }
 
@@ -317,13 +317,17 @@ tail -n +2 "$NORMALIZED_INPUT" | while IFS=$'\t' read -r genome_id name taxid re
   fi
 done
 
-python3 - "$SUCCESS_LIST" "$OUT_MANIFEST" <<'PY'
+python3 - "$SUCCESS_LIST" "$OUT_MANIFEST" "$FAIL_LIST" <<'PY'
 import csv, sys
 from pathlib import Path
 
 success = Path(sys.argv[1])
 out = Path(sys.argv[2])
 rows = []
+with open(sys.argv[3], newline="") as failed:
+    if any(len(r) >= 6 and r[5].strip().lower() == "target"
+           for r in csv.reader(failed, delimiter="\t")):
+        raise SystemExit("[ERROR] Target genome download failed; inspect download_failed.tsv and download_logs. Output manifest not updated.")
 if success.exists() and success.stat().st_size > 0:
     with success.open("r", encoding="utf-8") as fh:
         for line in fh:

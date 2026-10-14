@@ -1,0 +1,26 @@
+#!/bin/bash
+# EXAMPLE ONLY: replace resources/queue/account and paths for your site.
+# This is PBS Pro syntax; Torque sites may require nodes=1:ppn=4,mem=24gb.
+#PBS -N rrmg_example
+#PBS -l select=1:ncpus=4:mem=24gb
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -S /bin/bash
+
+set -euo pipefail
+source /path/to/miniconda3/etc/profile.d/conda.sh
+conda activate fungamr_meta
+export RRMG_CONFIG=/path/to/SpikeIN/rrmg_config.sh
+cd /path/to/rrmg-fungal-spikein
+
+# Usually no Java override is needed. Some PBS systems need explicit Java
+# selection in the job shell. If needed, uncomment AFTER conda activate:
+# export JAVA_BIN="$(readlink -f "$CONDA_PREFIX/bin/java")"
+# export JAVA_HOME="$(dirname "$(dirname "$JAVA_BIN")")"
+# export PATH="$JAVA_HOME/bin:$PATH"
+# java -version
+# Keep Java overrides in rrmg_config.sh empty if using these exports.
+
+# One job executes the chosen original plan rows sequentially. No array needed.
+# PBS resources must cover each row's config; --jobs 1 avoids multiplying them.
+bash ./rrmg_submit.sh "${RRMG_STAGE:-step2}" "${RRMG_ROWS:-1-100}" --jobs 1

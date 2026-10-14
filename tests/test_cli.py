@@ -85,12 +85,13 @@ class CLITests(unittest.TestCase):
         line = next(s for s in (wd / "rrmg_config.sh").read_text().splitlines() if s.startswith("WD="))
         self.assertEqual(shlex.split(line), ["WD=" + str(wd.resolve())])
 
-    def test_unresolved_paths_are_visible_not_invented(self):
+    def test_default_tool_paths_use_runtime_environment(self):
         args = cli.parser().parse_args(["init", "--workdir", str(self.root)])
         with patch.dict(os.environ, {}, clear=True), patch.object(cli.shutil, "which", return_value=None):
             settings = cli.detected_settings(args)
-        self.assertIn("/EDIT_ME/", settings["CONDA_SH"])
-        self.assertIn("/EDIT_ME/", settings["JAVA_BIN"])
+        self.assertEqual(settings["CONDA_SH"], "")
+        self.assertEqual(settings["JAVA_BIN"], "")
+        self.assertEqual(settings["RANDOMREADSMG_SH"], "")
 
     def test_explicit_tool_paths_are_retained(self):
         args = cli.parser().parse_args(["init", "--workdir", str(self.root), "--conda-sh", str(self.root / "conda.sh"),
@@ -117,6 +118,18 @@ class CLITests(unittest.TestCase):
         args = cli.parser().parse_args(["run", "step3", "1"])
         self.assertFalse(args.force)
         self.assertTrue(cli.parser().parse_args(["run", "step3", "1", "--force"]).force)
+
+    def test_init_preserves_pbs_java_exports_by_default(self):
+        wd = self.root / "project"
+        with patch.object(cli, "detected_settings", return_value={"JAVA_BIN": "", "JAVA_HOME": ""}):
+            self.assertEqual(self.call("init", "--workdir", wd), 0)
+        text = (wd / "rrmg_config.sh").read_text()
+        self.assertIn('JAVA_BIN="${JAVA_BIN:-}"', text)
+        self.assertIn('JAVA_HOME="${JAVA_HOME:-}"', text)
+
+    def test_step4_and_step5_are_available(self):
+        for step in ("step4", "step5", "step45"):
+            self.assertEqual(cli.parser().parse_args(["run", step, "1"]).step, step)
 
     def test_config_priority_is_explicit_then_env_then_workdir(self):
         first, second = self.root / "first.sh", self.root / "second.sh"

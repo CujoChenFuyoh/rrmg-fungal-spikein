@@ -392,7 +392,7 @@ def main():
 
     print('[OK] Wrote plan: {}'.format(out))
     print('[OK] Runs: {}'.format(idx))
-    print('[OK] Submit PBS array as: #PBS -J 1-{}'.format(idx))
+    print('[NEXT] After Step1 backgrounds finish: bash rrmg_submit.sh step2 1-{}'.format(idx))
     if fixed_reference_bp is not None:
         print('[OK] community_size_bp used for plan: {:.3f} ({})'.format(float(fixed_reference_bp), reference_source))
     else:

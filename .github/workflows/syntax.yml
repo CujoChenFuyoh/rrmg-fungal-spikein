@@ -18,7 +18,7 @@ jobs:
         run: |
           find . -type f \( -name '*.sh' -o -name '*.pbs' \) -print0 \
             | xargs -0 -n1 bash -n
-      - name: Smoke-test local and PBS dispatchers
+      - name: Smoke-test scheduler-free dispatch and original row selection
         run: bash tests/smoke_test_local_runner.sh
   package:
     runs-on: ubuntu-latest

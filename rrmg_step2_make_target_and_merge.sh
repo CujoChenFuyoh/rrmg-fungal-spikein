@@ -268,6 +268,7 @@ fi
 if [[ "$TARGET_PAIRS" -gt 0 ]]; then
   echo "[TARGET-SIM] sample=$SAMPLE target_pairs=$TARGET_PAIRS target_cov=$TARGET_COV seed=$TARGET_SEED"
   bash "$RANDOMREADSMG_SH" \
+    -Xmx"${BBMAP_XMX:-4g}" t="${THREADS:-1}" overwrite=t \
     ref="$TARGET_FASTA" out="$TARGET_R1" out2="$TARGET_R2" \
     reads="$TARGET_PAIRS" paired=t minlength="$READLEN" maxlength="$READLEN" seed="$TARGET_SEED" \
     2> "${TARGET_R1}.randomreadsmg.log"

@@ -22,15 +22,8 @@ mkdir -p \
   "$JAVA_HOME_FAKE/bin" \
   "$CALLS"
 
-WRAPPERS=(
-  rrmg_step1_background_array.pbs
-  rrmg_step2_target_merge_array.pbs
-  rrmg_step3_downstream_array.pbs
-  rrmg_step3b_vamb_array.pbs
-  rrmg_step4_5_supplementary_downstream_array.pbs
-)
-for wrapper in "${WRAPPERS[@]}"; do
-  cp "$REPO/$wrapper" "$PIPELINE/$wrapper"
+for helper in rrmg_run_one.sh rrmg_environment.sh; do
+  cp "$REPO/$helper" "$PIPELINE/$helper"
 done
 
 printf '%s\n' \
@@ -42,7 +35,7 @@ printf '%s\n' \
   > "$WD/input/rrmg/rrmg_permutation_plan.tsv"
 
 printf '%s\n' \
-  $'row_index\tbg_key' \
+  $'bg_index\tbg_key' \
   $'1\tbg_1' \
   $'2\tbg_2' \
   $'3\tbg_3' \
@@ -67,7 +60,7 @@ printf '%s\n' \
   > "$TEST_ROOT/fake_command.sh"
 chmod +x "$TEST_ROOT/fake_command.sh"
 
-for command_name in python3 minimap2 samtools vamb randomreadsmg.sh qsub; do
+for command_name in minimap2 samtools vamb randomreadsmg.sh; do
   cp "$TEST_ROOT/fake_command.sh" "$FAKEBIN/$command_name"
 done
 cp "$TEST_ROOT/fake_command.sh" "$JAVA_HOME_FAKE/bin/java"
@@ -77,7 +70,7 @@ printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -euo pipefail' \
   'name="$(basename "$0")"' \
-  'row="${PBS_ARRAY_INDEX:?missing PBS_ARRAY_INDEX}"' \
+  'row="${RRMG_ROW_INDEX:?missing RRMG_ROW_INDEX}"' \
   '{' \
   '  printf "step=%s\nrow=%s\n" "$name" "$row"' \
   '  printf "args="' \
@@ -131,7 +124,7 @@ run_local() {
   SMOKE_OUT="$CALLS" \
   SMOKE_FAIL_STEP="${SMOKE_FAIL_STEP:-}" \
   SMOKE_FAIL_ROW="${SMOKE_FAIL_ROW:-}" \
-    bash "$REPO/rrmg_run_local.sh" "$@"
+    bash "$REPO/${SMOKE_RUNNER:-rrmg_submit.sh}" "$@"
 }
 
 assert_file() {
@@ -151,6 +144,10 @@ grep -q -- '--keep-target-reads' "$CALLS/rrmg_step2_make_target_and_merge.sh.2.t
 run_local step3 1
 run_local step3b 1
 run_local step45 1
+run_local step4 2
+run_local step5 3
+grep -q -- "--skip-target-genome" "$CALLS/rrmg_step4_5_supplementary_downstream.sh.2.txt"
+grep -q -- "--skip-read-to-gene" "$CALLS/rrmg_step4_5_supplementary_downstream.sh.3.txt"
 assert_file "$CALLS/rrmg_step3_downstream_analysis.sh.1.txt"
 assert_file "$CALLS/rrmg_step3b_vamb_binning.sh.1.txt"
 assert_file "$CALLS/rrmg_step4_5_supplementary_downstream.sh.1.txt"
@@ -170,31 +167,22 @@ if SMOKE_FAIL_STEP=rrmg_step3_downstream_analysis.sh \
   exit 1
 fi
 
-printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  'printf "%q " "$@" >> "${SMOKE_QSUB_LOG:?}"' \
-  'printf "\n" >> "$SMOKE_QSUB_LOG"' \
-  'printf "12345.smoke\n"' \
-  > "$FAKEBIN/qsub"
+# Any accidental scheduler call must fail. No .pbs files exist in the pipeline.
+printf '#!/bin/bash\nexit 99\n' > "$FAKEBIN/qsub"
 chmod +x "$FAKEBIN/qsub"
-
-PATH="$FAKEBIN:$PATH" RRMG_CONFIG="$CONFIG" SMOKE_QSUB_LOG="$QSUB_LOG" \
-  bash "$REPO/rrmg_submit.sh" step1 >/dev/null
-PATH="$FAKEBIN:$PATH" RRMG_CONFIG="$CONFIG" SMOKE_QSUB_LOG="$QSUB_LOG" \
-  bash "$REPO/rrmg_submit.sh" step2 2-4 -W depend=afterok:12345 >/dev/null
-PATH="$FAKEBIN:$PATH" RRMG_CONFIG="$CONFIG" SMOKE_QSUB_LOG="$QSUB_LOG" \
-  bash "$REPO/rrmg_submit.sh" step3 1 >/dev/null
-PATH="$FAKEBIN:$PATH" RRMG_CONFIG="$CONFIG" SMOKE_QSUB_LOG="$QSUB_LOG" \
-  bash "$REPO/rrmg_submit.sh" step3b 2 >/dev/null
-PATH="$FAKEBIN:$PATH" RRMG_CONFIG="$CONFIG" SMOKE_QSUB_LOG="$QSUB_LOG" \
-  bash "$REPO/rrmg_submit.sh" step45 3-4 >/dev/null
-grep -q -- '-J 1-3' "$QSUB_LOG"
-grep -q -- '-J 2-4' "$QSUB_LOG"
-grep -q -- 'depend=afterok:12345' "$QSUB_LOG"
-grep -q -- 'rrmg_step3_downstream_array.pbs' "$QSUB_LOG"
-grep -q -- 'rrmg_step3b_vamb_array.pbs' "$QSUB_LOG"
-grep -q -- 'rrmg_step4_5_supplementary_downstream_array.pbs' "$QSUB_LOG"
-
-echo '[OK] Local runner dispatched multiple rows for all stages.'
-echo '[OK] Range validation, concurrency, force override, and failure propagation passed.'
-echo '[OK] PBS qsub command construction remained functional.'
+run_local step2 2-3 --jobs 1
+SMOKE_RUNNER=rrmg_run_local.sh run_local step2 1 --dry-run
+if run_local step2 1 -W depend=afterok:123 >/dev/null 2>&1; then
+  echo '[TEST ERROR] Old qsub option was accepted' >&2
+  exit 1
+fi
+# A parent scheduler's array ID must not override an explicitly selected row.
+PBS_ARRAY_INDEX=999 run_local step2 4
+# A sparse original plan is selected by ID, not by physical line number.
+printf 'run_index\trun_id\n409\trun409\n410\trun410\n' > "$WD/input/rrmg/rrmg_permutation_plan.tsv"
+run_local step2 409-410
+assert_file "$CALLS/rrmg_step2_make_target_and_merge.sh.410.txt"
+if run_local step2 1 --dry-run >/dev/null 2>&1; then exit 1; fi
+printf 'run_index\trun_id\n1\trun1\n1\trun2\n' > "$WD/input/rrmg/rrmg_permutation_plan.tsv"
+if run_local step2 1 --dry-run >/dev/null 2>&1; then exit 1; fi
+echo '[OK] Both scheduler-free entry points, all stages, force, concurrency, failure and ID selection.'

@@ -33,8 +33,7 @@ Options:
   -h, --help               Show this help
 
 Environment:
-  RRMG_CONDA_ENV           Unified conda environment; default fungamr_meta
-  CONDA_SH                 Path to conda.sh if conda is not initialized
+  Activate the analysis environment first; tools are resolved from PATH.
 
 Outputs under each RUN_DIR:
   binning/read_to_contigs/*.name_sorted.bam
@@ -68,7 +67,6 @@ VAMB_SEED=42
 VAMB_COMMAND="vamb"
 USE_CUDA=0
 FORCE=0
-RRMG_CONDA_ENV="${RRMG_CONDA_ENV:-fungamr_meta}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -111,29 +109,11 @@ EVALUATOR="${SCRIPT_DIR}/rrmg_evaluate_vamb_bins.py"
   exit 1
 }
 
-init_conda() {
-  if [[ -n "${CONDA_SH:-}" && -f "$CONDA_SH" ]]; then
-    # shellcheck disable=SC1090
-    source "$CONDA_SH"
-  elif [[ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
-    # shellcheck disable=SC1091
-    source "$HOME/miniconda3/etc/profile.d/conda.sh"
-  elif ! command -v conda >/dev/null 2>&1; then
-    echo "[ERROR] conda.sh not found; set CONDA_SH" >&2
-    exit 1
-  fi
-}
-
-init_conda
-
-conda_run() {
-  # --no-capture-output is required for the large binary BAM stream below.
-  conda run --no-capture-output -n "$RRMG_CONDA_ENV" "$@"
-}
+# All programs use the caller's active PATH, including binary BAM streams.
 
 mkdir -p "${WD}/temp"
 ROW_ENV="$(mktemp "${WD}/temp/rrmg_vamb_row.XXXXXX")"
-conda_run python3 - "$PLAN" "$ROW_INDEX" "$WD" > "$ROW_ENV" <<'PY'
+python3 - "$PLAN" "$ROW_INDEX" "$WD" > "$ROW_ENV" <<'PY'
 import csv
 import re
 import shlex
@@ -254,24 +234,24 @@ fi
 rm -f "$SUCCESS_MARKER"
 
 for executable in minimap2 samtools python3; do
-  if ! conda_run "$executable" --version >/dev/null 2>&1; then
-    if [[ "$executable" == "python3" ]] && conda_run python3 -V >/dev/null 2>&1; then
+  if ! "$executable" --version >/dev/null 2>&1; then
+    if [[ "$executable" == "python3" ]] && python3 -V >/dev/null 2>&1; then
       continue
     fi
     echo "[ERROR] Command is unavailable in conda env ${RRMG_CONDA_ENV}: $executable" >&2
     exit 1
   fi
 done
-if ! conda_run "$VAMB_COMMAND" --help >/dev/null 2>&1; then
+if ! "$VAMB_COMMAND" --help >/dev/null 2>&1; then
   echo "[ERROR] VAMB is unavailable in conda env ${RRMG_CONDA_ENV}: $VAMB_COMMAND" >&2
   exit 1
 fi
 
-VAMB_VERSION="$(conda_run "$VAMB_COMMAND" --version 2>&1 | head -n 1 || true)"
+VAMB_VERSION="$("$VAMB_COMMAND" --version 2>&1 | head -n 1 || true)"
 VAMB_MODE=""
-if conda_run "$VAMB_COMMAND" bin default --help >/dev/null 2>&1; then
+if "$VAMB_COMMAND" bin default --help >/dev/null 2>&1; then
   VAMB_MODE="v5"
-elif conda_run "$VAMB_COMMAND" --help 2>&1 | grep -q -- "--bamfiles"; then
+elif "$VAMB_COMMAND" --help 2>&1 | grep -q -- "--bamfiles"; then
   VAMB_MODE="legacy"
 else
   echo "[ERROR] Unsupported VAMB command-line interface: ${VAMB_COMMAND}" >&2
@@ -292,17 +272,17 @@ echo "VAMB model seed : $VAMB_SEED"
 echo "Threads         : $THREADS"
 echo "++++++++++++++++++++++++++++++++++++++++"
 
-conda_run minimap2 -I 32G -d "$MMI" "$CONTIGS" 2> "$MAP_LOG"
+minimap2 -I 32G -d "$MMI" "$CONTIGS" 2> "$MAP_LOG"
 
 # VAMB 3.x requires alignments for one read to remain consecutive.  A
 # query-name-sorted BAM satisfies that requirement and also works with VAMB 5.
-conda_run minimap2 -I 32G -t "$THREADS" -ax sr "$MMI" "$READ_R1" "$READ_R2" \
+minimap2 -I 32G -t "$THREADS" -ax sr "$MMI" "$READ_R1" "$READ_R2" \
   2>> "$MAP_LOG" \
-  | conda_run samtools view -@ "$THREADS" -F 3584 -b - \
-  | conda_run samtools sort -n -@ "$THREADS" -m 1G -O BAM -o "$BAM" -
+  | samtools view -@ "$THREADS" -F 3584 -b - \
+  | samtools sort -n -@ "$THREADS" -m 1G -O BAM -o "$BAM" -
 
-conda_run samtools quickcheck -v "$BAM"
-conda_run samtools flagstat -@ "$THREADS" "$BAM" > "$FLAGSTAT"
+samtools quickcheck -v "$BAM"
+samtools flagstat -@ "$THREADS" "$BAM" > "$FLAGSTAT"
 
 VAMB_ARGS=(
   --outdir "$VAMB_OUT"
@@ -317,9 +297,9 @@ if [[ "$USE_CUDA" -eq 1 ]]; then
 fi
 
 if [[ "$VAMB_MODE" == "v5" ]]; then
-  conda_run "$VAMB_COMMAND" bin default "${VAMB_ARGS[@]}" --bamdir "$BAM_DIR"
+  "$VAMB_COMMAND" bin default "${VAMB_ARGS[@]}" --bamdir "$BAM_DIR"
 else
-  conda_run "$VAMB_COMMAND" "${VAMB_ARGS[@]}" --bamfiles "$BAM"
+  "$VAMB_COMMAND" "${VAMB_ARGS[@]}" --bamfiles "$BAM"
 fi
 
 CLUSTERS_TSV=""
@@ -338,10 +318,10 @@ done
 }
 
 BINS_DIR="${VAMB_OUT}/bins"
-conda_run minimap2 -t "$THREADS" -x asm5 "$TARGET_REF" "$CONTIGS" \
+minimap2 -t "$THREADS" -x asm5 "$TARGET_REF" "$CONTIGS" \
   > "$TARGET_PAF" 2> "$TARGET_MAP_LOG"
 
-conda_run python3 "$EVALUATOR" \
+python3 "$EVALUATOR" \
   --clusters "$CLUSTERS_TSV" \
   --contigs "$CONTIGS" \
   --target-ref "$TARGET_REF" \

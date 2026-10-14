@@ -7,6 +7,13 @@ environment.yml
 docs/INSTALL.zh-CN.md
 rrmg_config.example.sh
 rrmg_run_local.sh
+rrmg_run_one.sh
+rrmg_environment.sh
+examples/local.sh
+examples/pbs.pbs
+examples/pbs_array.pbs
+examples/README.md
+examples/taxa_demo.tsv
 rrmg_submit.sh
 rrmg_preflight.sh
 rrmg_prepare_manifest.py

@@ -10,6 +10,8 @@ dependencies:
   - kraken2
   - minimap2
   - ncbi-datasets-cli
+  - openjdk
+  - unzip
   - samtools
   - spades
   - vamb
