@@ -2,16 +2,20 @@
 
 Uses temporary test data only. Run from repository root:
   python tests/check_installed_wheel.py dist/rrmg_fungal_spikein-0.2.0-py3-none-any.whl
-Linux additionally exercises the original runner with mock stage wrappers and
-the real supplementary collectors on an empty fixture. No scheduler is called.
+All platforms exercise the real Python collectors with missing inputs and
+two-row synthetic fixtures. Linux also checks the original runner with mock
+stage wrappers and the combined shell collector. No scheduler is called.
+Requires pip >=22.3 on the interpreter running this test.
 """
 import argparse
+import csv
 import hashlib
 import json
 import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import venv
 import zipfile
@@ -32,19 +36,24 @@ def main():
     with tempfile.TemporaryDirectory(prefix="rrmg-wheel-test-") as tmp:
         root = Path(tmp).resolve()
         envdir = root / "env"
-        venv.EnvBuilder(with_pip=True).create(envdir)
+        # Install through the caller's pip so Debian/Ubuntu Python without
+        # ensurepip can also test a genuinely isolated, pip-free environment.
+        venv.EnvBuilder(with_pip=False).create(envdir)
         bindir = envdir / ("Scripts" if os.name == "nt" else "bin")
         python = bindir / ("python.exe" if os.name == "nt" else "python")
         env = dict(os.environ, PYTHONPATH="", PYTHONNOUSERSITE="1")
         env.pop("RRMG_CONFIG", None)
-        subprocess.run([str(python), "-m", "pip", "install", "--no-index", "--no-deps", str(wheel)], check=True, env=env, cwd=root)
+        subprocess.run([sys.executable, "-m", "pip", "--python", str(python),
+                        "install", "--no-index", "--no-deps", str(wheel)], check=True, env=env, cwd=root)
         exe = bindir / ("rrmg.exe" if os.name == "nt" else "rrmg")
-        def run(*parts, ok=True):
+        def run(*parts, ok=True, error=None):
             result = subprocess.run([str(exe), *map(str, parts)], cwd=root, env=env, text=True, capture_output=True)
             if ok:
                 assert result.returncode == 0, result.stdout + result.stderr
             else:
                 assert result.returncode != 0, "Expected refusal"
+            if error is not None:
+                assert error in result.stdout + result.stderr, result.stdout + result.stderr
             return result.stdout
         assert run("--version").strip() == "rrmg " + expected
         installed = Path(run("path").strip())
@@ -67,6 +76,39 @@ def main():
         run("init", "--workdir", root / "snapshot project")
         assert (root / "snapshot project/.rrmg" / ("core-" + expected) / "rrmg_core_manifest.json").is_file()
         assert "usage" in run("script", "rrmg_make_plan.py", "--", "--help").lower()
+        # Collectors must reject missing results, not produce an empty success.
+        # Test this on Windows as well, rather than hiding it in the Linux branch.
+        run_root = wd / "temp/rrmg_permutation"
+        collectors = [
+            ("rrmg_collect_reads_to_gene_depth.py",
+             "readmap/reads_to_GENE.coverage_summary.tsv",
+             "rrmg_reads_to_gene_depth_summary.tsv", "No readmap coverage summaries",
+             [{"RunID": "run1", "RowIndex": "1", "MeanDepth": "2.500000"},
+              {"RunID": "run2", "RowIndex": "2", "MeanDepth": "0.000000"}]),
+            ("rrmg_collect_afum_genome_cov.py",
+             "target_readmap/afum_target_reads_to_genome.summary.tsv",
+             "rrmg_afum_target_reads_genome_coverage_summary.tsv", "No target_readmap summaries",
+             [{"RunID": "run1", "RowIndex": "1", "ObservedMeanDepth": "1.250000"},
+              {"RunID": "run2", "RowIndex": "2", "ObservedMeanDepth": "0.000000"}]),
+        ]
+        def assert_table(path, expected_rows):
+            with path.open(newline="") as fh:
+                assert list(csv.DictReader(fh, delimiter="\t")) == expected_rows, path
+        for script, relative, output_name, error, records in collectors:
+            out = root / "python collector outputs" / output_name
+            run("script", script, "--", "--root", run_root, "--out", out, ok=False, error=error)
+            assert not out.exists(), "Missing-input test must not create a success output"
+            # Only tiny synthetic TSVs, never project/HPC data.
+            for record in records:
+                path = run_root / record["RunID"] / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("w", newline="") as fh:
+                    writer = csv.DictWriter(fh, fieldnames=list(record), delimiter="\t", lineterminator="\n")
+                    writer.writeheader()
+                    writer.writerow(record)
+            run("script", script, "--", "--root", run_root, "--out", out)
+            assert_table(out, records)
+        print("[OK] Installed Python collectors reject missing inputs and preserve two fixture rows")
         if os.name != "nt":
             pipeline = root / "mock pipeline"
             pipeline.mkdir()
@@ -85,9 +127,18 @@ def main():
             wrapper.write_text("#!/bin/bash\nexit 9\n")
             run("run", "step2", "1", "--config", config, ok=False)
             env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+            empty_wd = root / "empty project"
+            empty_wd.mkdir()
+            run("script", "rrmg_collect_supplementary_downstream.sh", "--", empty_wd,
+                ok=False, error="No readmap coverage summaries")
+            assert not (empty_wd / "result/rrmg_reads_to_gene_depth_summary.tsv").exists()
             run("script", "rrmg_collect_supplementary_downstream.sh", "--", wd)
-            assert (wd / "result/rrmg_reads_to_gene_depth_summary.tsv").is_file()
-            assert (wd / "result/rrmg_afum_target_reads_genome_coverage_summary.tsv").is_file()
+            for _, _, output_name, _, records in collectors:
+                assert_table(wd / "result" / output_name, records)
+            # Also exercise the explicit absolute ROOT argument, with spaces.
+            run("script", "rrmg_collect_supplementary_downstream.sh", "--", wd, run_root)
+            for _, _, output_name, _, records in collectors:
+                assert_table(wd / "result" / output_name, records)
             print("[OK] Linux original-runner row/failure dispatch and separate-directory collectors")
         else:
             print("[NOTE] Linux execution tests skipped on Windows; covered by Linux CI configuration")
