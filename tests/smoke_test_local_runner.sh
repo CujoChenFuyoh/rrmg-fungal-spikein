@@ -158,6 +158,20 @@ assert_file "$CALLS/rrmg_step3_downstream_analysis.sh.1.txt"
 assert_file "$CALLS/rrmg_step3b_vamb_binning.sh.1.txt"
 assert_file "$CALLS/rrmg_step4_5_supplementary_downstream.sh.1.txt"
 grep -q -- '-t 5 -mem 37' "$CALLS/rrmg_step3_downstream_analysis.sh.1.txt"
+grep -q -- '--only-assembler' "$CALLS/rrmg_step3_downstream_analysis.sh.1.txt"
+
+# Config controls the same native mode for all entry points, even old configs
+# without the new key. Bad values fail instead of silently changing the method.
+printf 'STEP3_ONLY_ASSEMBLER=0\n' >> "$CONFIG"
+run_local step3 1
+grep -q -- '--with-error-correction' "$CALLS/rrmg_step3_downstream_analysis.sh.1.txt"
+if grep -q -- '--only-assembler' "$CALLS/rrmg_step3_downstream_analysis.sh.1.txt"; then exit 1; fi
+printf 'STEP3_ONLY_ASSEMBLER=invalid\n' >> "$CONFIG"
+if run_local step3 1 >/dev/null 2>&1; then
+  echo '[TEST ERROR] Invalid assembly mode unexpectedly succeeded' >&2
+  exit 1
+fi
+printf 'STEP3_ONLY_ASSEMBLER=1\n' >> "$CONFIG"
 grep -q -- '-t 6' "$CALLS/rrmg_step3b_vamb_binning.sh.1.txt"
 grep -q '^threads=7$' "$CALLS/rrmg_step4_5_supplementary_downstream.sh.1.txt"
 grep -q '^threads=8$' "$CALLS/rrmg_step4_5_supplementary_downstream.sh.2.txt"

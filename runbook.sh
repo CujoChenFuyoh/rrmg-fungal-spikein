@@ -81,6 +81,7 @@ head -n 2 "$WD/ref/CYP51A_wt.fasta"
 # 修改配置后必须重新执行：source "$RRMG_CONFIG"
 # 当前默认：Step1 4线程/4g heap，Step2 1线程/4g heap；
 # Step3 4线程/16GB SPAdes；Step4/5 4线程；LOCAL_JOBS=1。
+# Step3 默认 STEP3_ONLY_ASSEMBLER=1：保留 fastp，但跳过 BayesHammer reads 纠错。
 # 先检查机器剩余内存。资源不足时在配置中调低线程/内存或减少测试深度。
 # 下方提交命令用 -t/--threads 临时设置每行线程；Step1–3 还可用
 # -m/--memory 临时设置每行程序内存（正整数 GB，不设人为上限），无需改配置。
@@ -225,6 +226,8 @@ find "$WD/temp/rrmg_permutation" -path '*/design/read_mix_audit.tsv' -type f -si
 #   -m 16 / --memory 16     # 每个样品传给 metaSPAdes 的内存值（GB，无人为上限）
 # 仍由 config 控制：
 #   STEP3_PHRED_OFFSET=33       # 本流程模拟 Illumina reads 的质量编码
+#   STEP3_ONLY_ASSEMBLER=1      # 默认：fastp 后以 --only-assembler 拼接，跳过 BayesHammer
+#                              # 改为 0 则恢复原生 reads 纠错；不要混用两种模式做同组比较
 #   STEP3_SKIP_QC=0             # 设 1 仅在已有可验证 QC reads 时跳过 fastp
 #   STEP3_SKIP_ASSEMBLY=0       # 设 1 仅在已有可验证 assembly 时跳过拼接
 #   RUN_KRAKEN=0                # 设 1 时还必须设置 KRAKEN_DB
@@ -232,9 +235,16 @@ find "$WD/temp/rrmg_permutation" -path '*/design/read_mix_audit.tsv' -type f -si
 # 并发设置：--jobs 1 表示一次拼接 1 个样品；PBS ncpus 至少为 jobs × -t，
 #           PBS mem 应覆盖 jobs × -m，并额外预留其他进程和系统开销。
 # 这个 QC 是 fastp，不是 FastQC。不调用 Kraken2，不进行 VAMB binning。
+# 老 config 没有 STEP3_ONLY_ASSEMBLER 时也默认 1；需要纠错时在 RRMG_CONFIG 文件中设为 0。
+# 修改模式后需 --force 重建 Step3；仅 source 后设置未写入 config 的变量不会覆盖配置文件。
+# 日志应显示 [ASSEMBLY] mode=only-assembler；原生命令应包含 --only-assembler。
+# 完成后 asm/RRMG_ASSEMBLY_MODE 和 STEP3_SUCCESS 记录本次模式。
+# 已有旧 assembly 若缺少模式记录会要求重建，不会将旧 contigs 静默当成新模式结果。
+# 下面 -t/-m/--jobs 是用户可修改的示例资源值，不是流程对服务器资源的限制。
 bash "$CODE/rrmg_submit.sh" step3 1-2 -t 12 -m 100 --jobs 2 --force
 find "$WD/temp/rrmg_permutation" -path '*/asm/contigs.fasta' -type f -size +0c -print
 # 应看到两个 contigs.fasta。无目标基因命中不等于 assembly 运行失败。
+# 重新拼接后继续第 11–15 段，重收集 contig 汇总并重建绘图输入；不能只重画旧汇总。
 
 
 # ===== 9. Step4：QC reads → CYP51A，得到 per-base depth/coverage =====

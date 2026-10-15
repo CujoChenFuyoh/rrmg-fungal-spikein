@@ -26,6 +26,8 @@ Options:
   -species NAME          Species name to extract from Kraken2 report; default from plan
   -t INT                 Threads, default 24
   -mem INT               metaSPAdes memory GB, default 250
+  --only-assembler       Skip BayesHammer read correction (default); keep fastp QC
+  --with-error-correction  Enable native BayesHammer before assembly
   --skip-qc
   --skip-kraken
   --skip-assemble       Reuse an existing non-empty asm/contigs.fasta
@@ -46,6 +48,7 @@ KRAKEN_DB=""
 SPECIES_NAME=""
 THREADS=24
 SPADES_MEM_GB=250
+ONLY_ASSEMBLER=1
 SKIP_QC=0
 SKIP_KRAKEN=0
 SKIP_ASSEMBLE=0
@@ -63,6 +66,8 @@ while [[ $# -gt 0 ]]; do
     -species) SPECIES_NAME="$2"; shift 2;;
     -t) THREADS="$2"; shift 2;;
     -mem) SPADES_MEM_GB="$2"; shift 2;;
+    --only-assembler) ONLY_ASSEMBLER=1; shift 1;;
+    --with-error-correction) ONLY_ASSEMBLER=0; shift 1;;
     --skip-qc) SKIP_QC=1; shift 1;;
     --skip-kraken) SKIP_KRAKEN=1; shift 1;;
     --skip-assemble) SKIP_ASSEMBLE=1; shift 1;;
@@ -121,8 +126,12 @@ run_kraken2() {
 
 run_metaspades() {
   local in1="$1" in2="$2" outdir="$3"
+  local -a command=(metaspades.py -t "$THREADS" -m "$SPADES_MEM_GB" --phred-offset "$PHRED_OFFSET")
+  [[ "$ONLY_ASSEMBLER" -eq 0 ]] || command+=(--only-assembler)
+  command+=(-1 "$in1" -2 "$in2" -o "$outdir")
   mkdir -p "$outdir"
-  metaspades.py -t "$THREADS" -m "$SPADES_MEM_GB" --phred-offset "$PHRED_OFFSET" -1 "$in1" -2 "$in2" -o "$outdir" 2> "${outdir}/metaspades.log"
+  printf '[SPADES]'; printf ' %q' "${command[@]}"; printf '\n'
+  "${command[@]}" 2> "${outdir}/metaspades.log"
   [[ -s "${outdir}/contigs.fasta" ]] || { echo "[ERROR] metaSPAdes failed: ${outdir}/metaspades.log" >&2; exit 1; }
 }
 
@@ -184,6 +193,18 @@ FASTP_JSON="${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}.fastp.json"
 QC_PROVENANCE="${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}.mix_generation.txt"
 KRAKEN_PROVENANCE="${RUN_DIR}/kraken/${SAMPLE}.Seed${SEED}.mix_generation.txt"
 ASM_PROVENANCE="${RUN_DIR}/asm/RRMG_MIX_GENERATION"
+ASM_MODE_PROVENANCE="${RUN_DIR}/asm/RRMG_ASSEMBLY_MODE"
+ASSEMBLY_MODE=only-assembler
+[[ "$ONLY_ASSEMBLER" -eq 1 ]] || ASSEMBLY_MODE=error-correction-and-assembly
+
+require_assembly_mode() {
+  marker_matches "$ASM_MODE_PROVENANCE" "$ASSEMBLY_MODE" || {
+    echo "[ERROR] Existing assembly mode is different or unrecorded; requested: $ASSEMBLY_MODE" >&2
+    echo "        Inspect $ASM_MODE_PROVENANCE and spades.log; rerun Step3 with --force to rebuild." >&2
+    return 1
+  }
+}
+echo "[ASSEMBLY] mode=$ASSEMBLY_MODE (fastp QC is controlled separately)"
 
 [[ -n "$TOTAL_PAIRS" ]] || { echo "[ERROR] Plan row has no total_pairs/computed_total_pairs" >&2; exit 1; }
 python3 "$FASTQ_MIXER" validate-mix --audit "$MIX_AUDIT" --expected-pairs "$TOTAL_PAIRS" \
@@ -197,6 +218,7 @@ if [[ "$FORCE" -eq 0 && -s "$SUCCESS_MARKER" && -s "$CONTIGS" && -s "$MAP_SUM" &
     echo "        Rerun this row with --force; stale assembly/mapping will not be reused." >&2
     exit 1
   }
+  require_assembly_mode
   if [[ "$SKIP_QC" -eq 0 ]]; then
     python3 "$FASTQ_MIXER" validate-fastp --json "$FASTP_JSON" --expected-pairs "$TOTAL_PAIRS"
     marker_matches "$QC_PROVENANCE" "$MIX_GENERATION" || {
@@ -274,6 +296,7 @@ if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
       echo "[ERROR] Existing assembly belongs to an older/unaudited read mix. Rerun Step 3 with --force." >&2
       exit 1
     }
+    require_assembly_mode
     echo "[REUSE] Existing assembly: $CONTIGS"
   else
     if [[ "$FORCE" -eq 1 ]]; then
@@ -286,6 +309,7 @@ if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
     fi
     run_metaspades "$QC_R1" "$QC_R2" "${RUN_DIR}/asm"
     write_marker "$ASM_PROVENANCE" "$MIX_GENERATION"
+    write_marker "$ASM_MODE_PROVENANCE" "$ASSEMBLY_MODE"
   fi
 else
   [[ -s "$CONTIGS" ]] || {
@@ -296,6 +320,7 @@ else
     echo "[ERROR] --skip-assemble cannot reuse contigs from an older/unaudited read mix." >&2
     exit 1
   }
+  require_assembly_mode
   echo "[REUSE] Assembly requested with --skip-assemble: $CONTIGS"
 fi
 
@@ -324,6 +349,6 @@ mkdir -p result
   mv -f -- "$MASTER_TMP" "$MASTER"
 ) 9>"${MASTER}.lock"
 
-printf 'run_id=%s\nrow_index=%s\nmix_generation_id=%s\ncompleted=%s\n' \
-  "$RUN_ID" "$ROW_INDEX" "$MIX_GENERATION" "$(date -Is)" > "$SUCCESS_MARKER"
+printf 'run_id=%s\nrow_index=%s\nmix_generation_id=%s\nassembly_mode=%s\ncompleted=%s\n' \
+  "$RUN_ID" "$ROW_INDEX" "$MIX_GENERATION" "$ASSEMBLY_MODE" "$(date -Is)" > "$SUCCESS_MARKER"
 echo "[DONE] Downstream summary -> $MASTER"

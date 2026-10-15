@@ -10,6 +10,11 @@ and read coverage analysis. One-sample VAMB binning is optional.
 > paired-read interleaving into one gzip member, and fail-closed Step2–5 count
 > audits. The release also bundles the local runbook and R plotting scripts,
 > fixes figure paths under `WD`, and pins repository text to LF line endings.
+>
+> Step3 now defaults to `STEP3_ONLY_ASSEMBLER=1`: run fastp, then metaSPAdes
+> `--only-assembler`, bypassing BayesHammer read error correction. Set it to
+> `0` to restore native error correction. This is a method choice, not proof
+> of equivalent detection performance; use one mode for compared runs.
 
 > **Changed in 0.3.0:** `rrmg_submit.sh` now runs selected rows directly. It never
 > calls `qsub` or executes PBS files. Activate your environment first. Scheduling
@@ -299,6 +304,25 @@ sets the metaSPAdes memory value. It accepts any positive integer and imposes
 no workflow maximum. Steps 3b/4/5/45 do not expose a reliable total-memory cap,
 so `--memory` is rejected there rather than silently ignored. Scheduler memory
 must always be requested separately in the PBS/Slurm script.
+
+Step3 assembly mode is configured separately from QC and scheduler resources:
+
+```bash
+# In the rrmg_config.sh selected by RRMG_CONFIG:
+STEP3_ONLY_ASSEMBLER=1  # default: fastp QC, then assembly without BayesHammer
+# STEP3_ONLY_ASSEMBLER=0  # opt in to native read error correction + assembly
+```
+
+An older config without this key also defaults to `1`. `STEP3_SKIP_QC=1`
+skips fastp; it does **not** select an error-correction mode. Direct calls to
+`rrmg_step3_downstream_analysis.sh` accept `--only-assembler` (default) or
+`--with-error-correction`. Local and PBS examples use the same dispatcher.
+Step3 records `asm/RRMG_ASSEMBLY_MODE` and `assembly_mode` in `STEP3_SUCCESS`.
+Changing the mode, or reusing an old assembly with no recorded mode, requires
+an explicit Step3 `--force` rebuild; no existing contigs are relabelled or
+deleted automatically. Recollect contig summaries and regenerate alignment
+inputs/figures after rebuilding. Do not pool different modes without tracking
+them as separate processing conditions.
 
 ```bash
 bash ./rrmg_submit.sh step2 409-480 -t 1 -m 4 --dry-run

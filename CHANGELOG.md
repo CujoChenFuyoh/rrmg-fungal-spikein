@@ -2,6 +2,11 @@
 
 ## 0.3.1 — 2026-10-15
 
+- Default Step3 to `STEP3_ONLY_ASSEMBLER=1` (metaSPAdes `--only-assembler`)
+  while keeping fastp QC. Set `0` to enable native BayesHammer. Record assembly
+  mode and refuse reuse of mismatched/unrecorded modes without an explicit
+  rebuild. Document method comparability and re-collection in the runbook.
+- Normalize the locally CRLF-encoded runbook back to LF for Bash portability.
 - Let each invocation override per-row threads with `-t/--threads`. Add
   `-m/--memory GB` for the BBMap Java heap in Steps 1/2 and metaSPAdes in
   Step 3, with no workflow-imposed maximum; scheduler memory remains external.

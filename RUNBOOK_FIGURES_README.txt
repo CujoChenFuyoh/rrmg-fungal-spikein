@@ -14,6 +14,12 @@ Set paths in section 0. CODE is the repository or rrmg-exported core directory.
 All helpers ship with the repository and pip package; no RUNBOOK_DIR is needed.
 These helpers extend plotting only; they do not replace the core pipeline.
 
+Step3 defaults to STEP3_ONLY_ASSEMBLER=1: fastp QC, then metaSPAdes without
+BayesHammer. Set 0 in the active rrmg_config.sh to enable native correction.
+The assembly mode is recorded; switching mode or reusing old unrecorded contigs
+requires an explicit Step3 --force rebuild. Regenerate sections 11-15 afterward.
+Do not treat file presence or a newly rendered figure as proof of a new Step3 run.
+
 After Step1-5:
   11: collect results
   12: require complete IDs/files, exact target pairs, read-mix audits and fastp input counts

@@ -64,6 +64,11 @@ case "$STEP" in
     SCRIPT=rrmg_step3_downstream_analysis.sh
     require_file "$GENE_REF"
     ARGS=("$PLAN" "$ROW" -w "$WD" -gene "$GENE_REF" -t "${RRMG_THREADS_OVERRIDE:-${STEP3_THREADS:-4}}" -mem "${RRMG_MEMORY_GB_OVERRIDE:-${STEP3_SPADES_MEM_GB:-16}}" --phred-offset "${STEP3_PHRED_OFFSET:-33}")
+    case "${STEP3_ONLY_ASSEMBLER:-1}" in
+      1) ARGS+=(--only-assembler);;
+      0) ARGS+=(--with-error-correction);;
+      *) echo '[ERROR] STEP3_ONLY_ASSEMBLER must be 0 or 1' >&2; exit 1;;
+    esac
     if [[ "${RUN_KRAKEN:-0}" == 1 ]]; then
       ARGS+=(--db "${KRAKEN_DB:?Set KRAKEN_DB}")
     else

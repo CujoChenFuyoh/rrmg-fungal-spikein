@@ -168,6 +168,20 @@ step1 的数字是 background plan 的 `bg_index`，其他步骤是原 permutati
 参数，因此会拒绝 `--memory`，避免产生已经限制内存的错觉。PBS/Slurm 的实际
 内存仍由用户在调度脚本中申请，不能由 `rrmg_submit.sh` 代替。
 
+Step3 默认在 fastp QC 后使用 metaSPAdes `--only-assembler`，跳过 BayesHammer
+reads 纠错。在实际使用的 `rrmg_config.sh` 中通过以下参数控制：
+
+```bash
+STEP3_ONLY_ASSEMBLER=1  # 默认：跳过 BayesHammer，不跳过 fastp
+# STEP3_ONLY_ASSEMBLER=0  # 恢复原生 reads 纠错后再拼接
+```
+
+老 config 没有该项时也默认 `1`。这与 `STEP3_SKIP_QC` 不同，后者才是跳过 fastp。
+模式写入 `asm/RRMG_ASSEMBLY_MODE` 和 `STEP3_SUCCESS`；模式改变，或旧 assembly 没有
+模式记录时，需显式用 Step3 `--force` 重建，不能把旧 contigs 自动改标为新模式。
+直接调用 Step3 脚本时使用 `--only-assembler`（默认）或 `--with-error-correction`。
+切换模式后重新收集结果和绘图输入；纠错与不纠错是不同处理条件，不默认检出性能等同。
+
 普通 PBS 示例的计算部分是：
 
 ```bash

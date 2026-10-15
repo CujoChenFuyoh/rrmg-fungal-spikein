@@ -57,6 +57,11 @@ STEP2_FORCE=0
 STEP3_THREADS=4
 STEP3_SPADES_MEM_GB=16
 STEP3_PHRED_OFFSET=33
+# 1: pass --only-assembler (skip BayesHammer, but still run fastp QC).
+# 0: enable native metaSPAdes read error correction before assembly.
+# Keep this choice consistent across compared runs. A mode change requires
+# rebuilding Step3 with --force; existing assemblies are never silently relabelled.
+STEP3_ONLY_ASSEMBLER=1
 STEP3_SKIP_QC=0
 STEP3_SKIP_ASSEMBLY=0
 STEP3_FORCE=0

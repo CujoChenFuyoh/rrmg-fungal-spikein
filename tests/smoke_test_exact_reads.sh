@@ -79,6 +79,7 @@ printf '%s\n' "$MIX_GENERATION" > "$RUN/qc/Pilot.Seed1.mix_generation.txt"
 sleep 1
 cp "$WD/ref/target.fasta" "$RUN/asm/contigs.fasta"
 printf '%s\n' "$MIX_GENERATION" > "$RUN/asm/RRMG_MIX_GENERATION"
+printf '%s\n' 'only-assembler' > "$RUN/asm/RRMG_ASSEMBLY_MODE"
 bash "$REPO/rrmg_step3_downstream_analysis.sh" "$WD/input/rrmg/plan.tsv" 1 \
   -w "$WD" -gene "$WD/ref/target.fasta" --skip-kraken --skip-assemble -t 2 -mem 1
 THREADS=2 bash "$REPO/rrmg_step4_reads_to_gene_depth.sh" "$WD/input/rrmg/plan.tsv" 1 \
