@@ -22,5 +22,7 @@ cd /path/to/rrmg-fungal-spikein
 # Keep Java overrides in rrmg_config.sh empty if using these exports.
 
 # One job executes the chosen original plan rows sequentially. No array needed.
-# PBS resources must cover each row's config; --jobs 1 avoids multiplying them.
-bash ./rrmg_submit.sh "${RRMG_STAGE:-step2}" "${RRMG_ROWS:-1-100}" --jobs 1
+# PBS resources must cover these per-row settings; --jobs 1 avoids multiplying them.
+RUN_ARGS=(-t "${RRMG_THREADS:-1}" --jobs 1)
+[[ -n "${RRMG_MEMORY_GB:-}" ]] && RUN_ARGS+=(-m "$RRMG_MEMORY_GB")
+bash ./rrmg_submit.sh "${RRMG_STAGE:-step2}" "${RRMG_ROWS:-1-100}" "${RUN_ARGS[@]}"

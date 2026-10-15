@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FASTQ_MIXER="${FASTQ_MIXER:-$SCRIPT_DIR/rrmg_mix_paired_fastq.py}"
 
 usage() {
   cat <<'USAGE'
@@ -86,8 +88,20 @@ WD="$(mkdir -p "$WD" && cd "$WD" && pwd)"
 cd "$WD"
 
 [[ -s "$PLAN" ]] || { echo "[ERROR] Missing plan: $PLAN" >&2; exit 1; }
+[[ -s "$FASTQ_MIXER" ]] || { echo "[ERROR] FASTQ audit utility not found: $FASTQ_MIXER" >&2; exit 1; }
 command -v "$MINIMAP2_BIN" >/dev/null 2>&1 || { echo "[ERROR] minimap2 not found: $MINIMAP2_BIN" >&2; exit 1; }
 command -v "$SAMTOOLS_BIN" >/dev/null 2>&1 || { echo "[ERROR] samtools not found: $SAMTOOLS_BIN" >&2; exit 1; }
+
+marker_matches() {
+  local marker="$1" expected="$2"
+  [[ -s "$marker" && "$(tr -d '\r\n' < "$marker")" == "$expected" ]]
+}
+
+write_marker() {
+  local marker="$1" value="$2" temporary="${1}.tmp.$$"
+  printf '%s\n' "$value" > "$temporary"
+  mv -f -- "$temporary" "$marker"
+}
 
 mkdir -p "${WD}/temp"
 ROW_ENV="$(mktemp "${WD}/temp/rrmg_afum_genomecov_row_env.XXXXXX")"
@@ -227,6 +241,7 @@ COV="${PREFIX}.coverage.tsv"
 IDX="${PREFIX}.idxstats.tsv"
 FLAG="${PREFIX}.flagstat.txt"
 SUMMARY="${PREFIX}.summary.tsv"
+OUTPUT_PROVENANCE="${PREFIX}.mix_generation.txt"
 BINS="${PREFIX}.bins.tsv"
 WINDOWS="${PREFIX}.windows.${BIN_SIZE}.bed"
 
@@ -237,12 +252,50 @@ echo "[INFO] TARGET_R1           = $TARGET_R1"
 echo "[INFO] TARGET_R2           = $TARGET_R2"
 echo "[INFO] MAKE_BINS           = $MAKE_BINS"
 
+[[ -n "$TOTAL_PAIRS" ]] || { echo "[ERROR] Plan/design has no total_pairs" >&2; exit 1; }
+[[ -n "$TARGET_PAIRS_DESIGN" ]] || { echo "[ERROR] merge_design.tsv has no target_pairs" >&2; exit 1; }
+MIX_AUDIT="${RUN_DIR}/design/read_mix_audit.tsv"
+TARGET_PAIRS_EXPECTED="$(python3 - "$TARGET_PAIRS_DESIGN" <<'PY'
+import sys
+value = float(sys.argv[1])
+if value < 0 or not value.is_integer():
+    raise SystemExit('[ERROR] Invalid target_pairs in merge design: ' + sys.argv[1])
+print(int(value))
+PY
+)"
+TOTAL_PAIRS_EXPECTED="$(python3 - "$TOTAL_PAIRS" <<'PY'
+import sys
+value = float(sys.argv[1])
+if value <= 0 or not value.is_integer():
+    raise SystemExit('[ERROR] Invalid total_pairs in plan/design: ' + sys.argv[1])
+print(int(value))
+PY
+)"
+BACKGROUND_PAIRS_EXPECTED=$((TOTAL_PAIRS_EXPECTED - TARGET_PAIRS_EXPECTED))
+python3 "$FASTQ_MIXER" validate-mix --audit "$MIX_AUDIT" --expected-pairs "$TOTAL_PAIRS_EXPECTED" \
+  --expected-background-pairs "$BACKGROUND_PAIRS_EXPECTED" --expected-target-pairs "$TARGET_PAIRS_EXPECTED"
+MIX_GENERATION="$(awk -F '\t' '$1=="mix_generation_id"{print $2}' "$MIX_AUDIT")"
+TARGET_PAIRS_OBSERVED="$(python3 "$FASTQ_MIXER" count --r1 "$TARGET_R1" --r2 "$TARGET_R2")"
+if [[ "$TARGET_PAIRS_OBSERVED" != "$TARGET_PAIRS_EXPECTED" ]]; then
+  echo "[ERROR] Target-only FASTQ pair count differs from design: expected=$TARGET_PAIRS_EXPECTED observed=$TARGET_PAIRS_OBSERVED" >&2
+  echo "        Rerun corrected Step 2 with --keep-target-reads; this Step 5 result would be quantitatively invalid." >&2
+  exit 1
+fi
+echo "[TARGET-PAIR-AUDIT] expected=$TARGET_PAIRS_EXPECTED observed=$TARGET_PAIRS_OBSERVED"
+
 if [[ "$FORCE" -eq 0 && -s "$SUMMARY" ]]; then
-  echo "[SKIP] existing summary: $SUMMARY"
-  exit 0
+  if marker_matches "$OUTPUT_PROVENANCE" "$MIX_GENERATION"; then
+    if [[ "$MAKE_BINS" -eq 0 || -s "$BINS" ]]; then
+      echo "[SKIP] existing audited summary: $SUMMARY"
+      exit 0
+    fi
+    echo "[STALE] Current Step 5 summary has no requested bins; regenerating it."
+  else
+    echo "[STALE] Existing Step 5 summary does not match the current read-mix generation; regenerating it."
+  fi
 fi
 
-rm -f "$BAM" "${BAM}.bai" "$COV" "$IDX" "$FLAG" "$SUMMARY" "$BINS" "$WINDOWS"
+rm -f "$BAM" "${BAM}.bai" "$COV" "$IDX" "$FLAG" "$SUMMARY" "$BINS" "$WINDOWS" "$OUTPUT_PROVENANCE"
 
 "$MINIMAP2_BIN" -t "$THREADS" -ax sr --secondary=no "$TARGET_GENOME_FASTA" "$TARGET_R1" "$TARGET_R2" \
   2> "${PREFIX}.minimap2.log" \
@@ -333,4 +386,5 @@ if [[ "$KEEP_BAM" -eq 0 ]]; then
   rm -f "$BAM" "${BAM}.bai"
 fi
 [[ -s "$SUMMARY" ]] || { echo "[ERROR] summary not created: $SUMMARY" >&2; exit 1; }
+write_marker "$OUTPUT_PROVENANCE" "$MIX_GENERATION"
 echo "[DONE] $SUMMARY"

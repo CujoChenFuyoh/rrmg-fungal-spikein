@@ -27,3 +27,11 @@ if [[ -n "$RANDOMREADSMG_SH" ]]; then
   RANDOMREADSMG_SH="$(readlink -f "$RANDOMREADSMG_SH")"
   export RANDOMREADSMG_SH
 fi
+RANDOMREADS_SH="${RANDOMREADS_SH:-$(command -v randomreads.sh || true)}"
+if [[ -z "$RANDOMREADS_SH" && -n "$RANDOMREADSMG_SH" && -s "$(dirname "$RANDOMREADSMG_SH")/randomreads.sh" ]]; then
+  RANDOMREADS_SH="$(dirname "$RANDOMREADSMG_SH")/randomreads.sh"
+fi
+if [[ -n "$RANDOMREADS_SH" ]]; then
+  RANDOMREADS_SH="$(readlink -f "$RANDOMREADS_SH")"
+  export RANDOMREADS_SH
+fi

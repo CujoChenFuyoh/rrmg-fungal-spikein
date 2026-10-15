@@ -8,7 +8,7 @@
 ```bash
 conda activate fungamr_meta
 export RRMG_CONFIG=/path/to/SpikeIN/rrmg_config.sh
-bash ./rrmg_submit.sh step2 1-100 --jobs 1
+bash ./rrmg_submit.sh step2 1-100 -t 1 -m 4 --jobs 1
 # 等价的示例包装：bash examples/local.sh step2 1-100
 ```
 
@@ -16,11 +16,13 @@ bash ./rrmg_submit.sh step2 1-100 --jobs 1
 
 修改 [pbs.pbs](pbs.pbs)，保留服务器验证过的 PBS 头部。
 模板的 PBS Pro `select=1:ncpus=4:mem=24gb` 可按站点改为 Torque 所需的
-`nodes=1:ppn=4`、`mem=24gb` 等。线程/内存必须与配置匹配，给 Java/SPAdes 留额外内存。
+`nodes=1:ppn=4`、`mem=24gb` 等。用 `RRMG_THREADS` 和可选的
+`RRMG_MEMORY_GB` 把运行参数传给流程；调度器申请值仍在 PBS 头中设置，并应
+覆盖 `--jobs ×` 每行资源及额外开销。`RRMG_MEMORY_GB` 仅适用于 Step1–3。
 100 个样品顺序处理可能超过 walltime；首次用一个样品估计时间后再分块。
 
 ```bash
-qsub -v RRMG_STAGE=step2,RRMG_ROWS=1-100 examples/pbs.pbs
+qsub -v RRMG_STAGE=step2,RRMG_ROWS=1-100,RRMG_THREADS=1,RRMG_MEMORY_GB=4 examples/pbs.pbs
 # 下一阶段只在上游完成后提交：
 # qsub -v RRMG_STAGE=step3,RRMG_ROWS=1-100 examples/pbs.pbs
 ```
@@ -31,7 +33,7 @@ qsub -v RRMG_STAGE=step2,RRMG_ROWS=1-100 examples/pbs.pbs
 PBS Pro 示例：
 
 ```bash
-qsub -J 1-100 -v RRMG_STAGE=step2 examples/pbs_array.pbs
+qsub -J 1-100 -v RRMG_STAGE=step2,RRMG_THREADS=1,RRMG_MEMORY_GB=4 examples/pbs_array.pbs
 ```
 
 Torque 可能使用 `qsub -t 1-100` 和 `PBS_ARRAYID`，见

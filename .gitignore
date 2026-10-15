@@ -16,6 +16,7 @@ temp/
 result/
 logs/
 figure_data/
+figure_output/
 genomes/
 
 # Large bioinformatics files

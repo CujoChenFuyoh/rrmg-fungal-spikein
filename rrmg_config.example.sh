@@ -20,6 +20,7 @@ RRMG_CONDA_ENV="fungamr_meta"
 # A separately installed BBMap can be selected without changing environments.
 BBMAP_DIR="${BBMAP_DIR:-}"
 RANDOMREADSMG_SH="${RANDOMREADSMG_SH:-}"
+RANDOMREADS_SH="${RANDOMREADS_SH:-}"
 JAVA_HOME="${JAVA_HOME:-}"
 JAVA_BIN="${JAVA_BIN:-}"
 
@@ -34,8 +35,10 @@ TARGET_GENOME="ref/Afum_Af293.fasta"
 RUN_KRAKEN=0
 KRAKEN_DB="/absolute/path/to/kraken2_database"
 
-# Conservative pilot defaults, NOT guaranteed sufficient for a full metagenome.
-# Increase for real datasets and match your allocation (heap/memory + overhead).
+# Conservative fallback defaults, used only when the command omits -t/--threads
+# or (for Steps 1-3) -m/--memory. They are NOT guaranteed sufficient for a full
+# metagenome. Command-line memory has no artificial maximum, but it does not
+# request scheduler resources; match the PBS/Slurm allocation and leave overhead.
 # Non-PBS runs default to one row at a time. Increase only after accounting for
 # each row's thread and memory settings below.
 LOCAL_JOBS=1

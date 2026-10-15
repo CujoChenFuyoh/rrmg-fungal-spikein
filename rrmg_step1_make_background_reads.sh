@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FASTQ_MIXER="${FASTQ_MIXER:-$SCRIPT_DIR/rrmg_mix_paired_fastq.py}"
 
 usage() {
   cat <<'USAGE'
@@ -19,6 +21,7 @@ Input:
 Output:
   <bg_dir>/reads/<bg_key>.background_1.fastq.gz
   <bg_dir>/reads/<bg_key>.background_2.fastq.gz
+  <bg_dir>/reads/<bg_key>.background_1.fastq.gz.pair_count.tsv
 
 Run after:
   rrmg_make_background_plan.py
@@ -67,6 +70,7 @@ cd "$WD"
 
 [[ -s "$BACKGROUND_PLAN" ]] || { echo "[ERROR] Background plan not found: $BACKGROUND_PLAN" >&2; exit 1; }
 [[ -s "$RANDOMREADSMG_SH" ]] || { echo "[ERROR] RANDOMREADSMG_SH not found: $RANDOMREADSMG_SH" >&2; exit 1; }
+[[ -s "$FASTQ_MIXER" ]] || { echo "[ERROR] FASTQ pair utility not found: $FASTQ_MIXER" >&2; exit 1; }
 
 mkdir -p "${WD}/temp"
 ROW_ENV="$(mktemp "${WD}/temp/rrmg_bg_row_env.XXXXXX")"
@@ -105,6 +109,30 @@ rm -f "$ROW_ENV"
 mkdir -p "${BG_DIR}/reads" "${BG_DIR}/logs"
 
 log="${BG_DIR}/reads/${BG_KEY}.randomreadsmg.log"
+pair_count_tsv="${BG_R1}.pair_count.tsv"
+
+ensure_background_pair_count() {
+  local source_pairs temporary
+  if [[ -s "$pair_count_tsv" ]]; then
+    source_pairs="$(awk -F '\t' '$1=="source_pairs"{print $2}' "$pair_count_tsv")"
+    if [[ "$source_pairs" =~ ^[0-9]+$ && "$source_pairs" -ge "$BACKGROUND_PAIRS" ]]; then
+      echo "[BG-COUNT] reuse source_pairs=$source_pairs from $pair_count_tsv"
+      return 0
+    fi
+  fi
+  echo "[BG-COUNT] validating paired FASTQ and recording exact source count"
+  source_pairs="$(python3 "$FASTQ_MIXER" count --r1 "$BG_R1" --r2 "$BG_R2")"
+  [[ "$source_pairs" =~ ^[0-9]+$ ]] || { echo "[ERROR] Invalid background pair count: $source_pairs" >&2; exit 1; }
+  [[ "$source_pairs" -ge "$BACKGROUND_PAIRS" ]] || {
+    echo "[ERROR] Background simulator produced $source_pairs pairs; design requires $BACKGROUND_PAIRS" >&2
+    exit 1
+  }
+  temporary="${pair_count_tsv}.tmp.$$"
+  printf 'key\tvalue\nsource_pairs\t%s\ndesign_pairs\t%s\nr1\t%s\nr2\t%s\n' \
+    "$source_pairs" "$BACKGROUND_PAIRS" "$BG_R1" "$BG_R2" > "$temporary"
+  mv -f -- "$temporary" "$pair_count_tsv"
+  echo "[BG-COUNT] source_pairs=$source_pairs design_pairs=$BACKGROUND_PAIRS"
+}
 
 cat <<INFO
 [BG] bg_index=${BG_INDEX}
@@ -124,7 +152,8 @@ INFO
 [[ -s "$DESIGN_TSV" ]] || { echo "[ERROR] Missing design TSV: $DESIGN_TSV" >&2; exit 1; }
 
 if [[ "$FORCE" -eq 0 && -s "$BG_R1" && -s "$BG_R2" ]]; then
-  echo "[BG] background exists, skip: $BG_R1 / $BG_R2"
+  ensure_background_pair_count
+  echo "[BG] background exists and is pair-audited, skip: $BG_R1 / $BG_R2"
   exit 0
 fi
 
@@ -144,7 +173,7 @@ done < "$DESIGN_TSV"
   exit 1
 }
 
-rm -f "$BG_R1" "$BG_R2"
+rm -f -- "$BG_R1" "$BG_R2" "$pair_count_tsv"
 
 bash "$RANDOMREADSMG_SH" \
   -Xmx"$BBMAP_XMX" \
@@ -162,6 +191,8 @@ bash "$RANDOMREADSMG_SH" \
   echo "[ERROR] background randomreadsmg failed; see $log" >&2
   exit 1
 }
+
+ensure_background_pair_count
 
 echo "[BG-DONE] ${BG_KEY}"
 echo "[BG-DONE] ${BG_R1}"

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FASTQ_MIXER="${FASTQ_MIXER:-$SCRIPT_DIR/rrmg_mix_paired_fastq.py}"
 
 usage() {
   cat <<'USAGE'
@@ -8,8 +10,9 @@ Usage:
     --background-index temp/rrmg_background/background_index.tsv
 
 Purpose:
-  For one plan row / seed, generate ONLY target-species reads with that seed,
-  then merge them with precomputed background reads.
+  For one plan row / seed, generate an exact total of target-species read
+  pairs, uniformly subsample the exact background total, and reproducibly
+  interleave paired reads into one gzip member per mate.
 
 Inputs:
   permutation plan, background_index.tsv, background FASTQ, target genome FASTA
@@ -17,13 +20,14 @@ Inputs:
 Outputs:
   <run_dir>/reads/<sample>.Seed<seed>_{1,2}.fastq.gz
   <run_dir>/design/merge_design.tsv
+  <run_dir>/design/read_mix_audit.tsv
 
 Important:
   Use --keep-target-reads when Step 5 or the target-only CYP51A comparison will
   be run later. Without it, target-only FASTQs are deleted after merging.
 
 Required environment:
-  RANDOMREADSMG_SH      Absolute path to randomreadsmg.sh
+  RANDOMREADS_SH        Absolute path to BBMap randomreads.sh
 USAGE
 }
 
@@ -51,12 +55,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 : "${WD:?Missing -w}"
-: "${RANDOMREADSMG_SH:?RANDOMREADSMG_SH is not set}"
+: "${RANDOMREADS_SH:?RANDOMREADS_SH is not set}"
 WD="$(mkdir -p "$WD" && cd "$WD" && pwd)"
 cd "$WD"
 [[ -s "$PLAN" ]] || { echo "[ERROR] Plan not found: $PLAN" >&2; exit 1; }
 [[ -s "$BACKGROUND_INDEX" ]] || { echo "[ERROR] Background index not found: $BACKGROUND_INDEX" >&2; exit 1; }
-[[ -s "$RANDOMREADSMG_SH" ]] || { echo "[ERROR] RANDOMREADSMG_SH not found: $RANDOMREADSMG_SH" >&2; exit 1; }
+[[ -s "$RANDOMREADS_SH" ]] || { echo "[ERROR] RANDOMREADS_SH not found: $RANDOMREADS_SH" >&2; exit 1; }
+[[ -s "$FASTQ_MIXER" ]] || { echo "[ERROR] FASTQ pair utility not found: $FASTQ_MIXER" >&2; exit 1; }
 
 ROW_ENV="$(mktemp "${WD}/temp/rrmg_row_env.XXXXXX")"
 python3 - "$PLAN" "$ROW_INDEX" "$WD" "$BACKGROUND_INDEX" "$READLEN_DEFAULT" > "$ROW_ENV" <<'PY'
@@ -132,6 +137,7 @@ sample=chosen.get('sample') or chosen.get('run_id') or f'row{row_index}'
 run_id=chosen.get('run_id') or f'{sample}__Seed{chosen.get("seed",row_index)}'
 seed=int(float(chosen.get('seed') or row_index))
 target_seed=seed + 2900000
+mix_seed=seed + 3900000
 
 target_name=chosen.get('target_name','')
 target_taxid=chosen.get('target_taxid','')
@@ -246,13 +252,14 @@ target_r2=reads_dir/f"{safe(target_gid or 'target')}.{run_tag}.target_2.fastq.gz
 mix_r1=reads_dir/f"{safe(sample)}.{run_tag}_1.fastq.gz"
 mix_r2=reads_dir/f"{safe(sample)}.{run_tag}_2.fastq.gz"
 meta=design_dir/'merge_design.tsv'
+mix_audit=design_dir/'read_mix_audit.tsv'
 with meta.open('w') as fh:
     fh.write('key\tvalue\n')
-    for k,v in [('row_index',row_index),('run_id',run_id),('sample',sample),('bg_key',bg_key),('background_r1',bg_r1),('background_r2',bg_r2),('target_name',target_name),('target_taxid',target_taxid),('target_genome_id',target_gid),('target_fasta',target_fasta),('target_abundance',ta),('total_pairs',total_pairs),('background_pairs',bg_pairs),('target_pairs',target_pairs),('target_seed',target_seed),('target_genome_bp',target_len),('target_cov',target_cov),('mixed_r1',mix_r1),('mixed_r2',mix_r2),('readlen',readlen)]:
+    for k,v in [('row_index',row_index),('run_id',run_id),('sample',sample),('bg_key',bg_key),('background_r1',bg_r1),('background_r2',bg_r2),('target_name',target_name),('target_taxid',target_taxid),('target_genome_id',target_gid),('target_fasta',target_fasta),('target_abundance',ta),('total_pairs',total_pairs),('background_pairs',bg_pairs),('target_pairs',target_pairs),('target_seed',target_seed),('mix_seed',mix_seed),('target_genome_bp',target_len),('target_cov',target_cov),('mixed_r1',mix_r1),('mixed_r2',mix_r2),('mix_audit',mix_audit),('readlen',readlen)]:
         fh.write(f'{k}\t{v}\n')
 
 for k,v in {
-'RUN_ID':run_id,'SAMPLE':sample,'READLEN':readlen,'TARGET_FASTA':target_fasta,'TARGET_PAIRS':target_pairs,'TARGET_SEED':target_seed,'TARGET_R1':target_r1,'TARGET_R2':target_r2,'BG_R1':bg_r1,'BG_R2':bg_r2,'MIX_R1':mix_r1,'MIX_R2':mix_r2,'RUN_DIR':run_dir,'TARGET_COV':target_cov,'TARGET_GENOME_BP':target_len}.items():
+'RUN_ID':run_id,'SAMPLE':sample,'READLEN':readlen,'TOTAL_PAIRS':total_pairs,'BACKGROUND_PAIRS':bg_pairs,'TARGET_FASTA':target_fasta,'TARGET_PAIRS':target_pairs,'TARGET_SEED':target_seed,'MIX_SEED':mix_seed,'TARGET_R1':target_r1,'TARGET_R2':target_r2,'BG_R1':bg_r1,'BG_R2':bg_r2,'MIX_R1':mix_r1,'MIX_R2':mix_r2,'RUN_DIR':run_dir,'MERGE_DESIGN':meta,'MIX_AUDIT':mix_audit,'TARGET_COV':target_cov,'TARGET_GENOME_BP':target_len}.items():
     print(f'{k}={q(v)}')
 PY
 # shellcheck disable=SC1090
@@ -260,31 +267,77 @@ source "$ROW_ENV"
 rm -f "$ROW_ENV"
 
 mkdir -p "$(dirname "$TARGET_R1")" "$(dirname "$MIX_R1")"
+BG_PAIR_COUNT_TSV="${BG_R1}.pair_count.tsv"
+[[ -s "$BG_PAIR_COUNT_TSV" ]] || {
+  echo "[ERROR] Background pair-count audit missing: $BG_PAIR_COUNT_TSV" >&2
+  echo "        Run the matching Step 1 row once with the updated pipeline; existing FASTQs will be counted, not regenerated." >&2
+  exit 1
+}
+BG_SOURCE_PAIRS="$(awk -F '\t' '$1=="source_pairs"{print $2}' "$BG_PAIR_COUNT_TSV")"
+[[ "$BG_SOURCE_PAIRS" =~ ^[0-9]+$ && "$BG_SOURCE_PAIRS" -ge "$BACKGROUND_PAIRS" ]] || {
+  echo "[ERROR] Invalid background source count in $BG_PAIR_COUNT_TSV: $BG_SOURCE_PAIRS" >&2
+  exit 1
+}
+
 if [[ "$FORCE" -eq 0 && -s "$MIX_R1" && -s "$MIX_R2" ]]; then
-  echo "[MERGE] exists, skip: $MIX_R1 / $MIX_R2"
-  exit 0
+  if python3 "$FASTQ_MIXER" validate-mix \
+       --audit "$MIX_AUDIT" --expected-pairs "$TOTAL_PAIRS" \
+       --expected-background-pairs "$BACKGROUND_PAIRS" --expected-target-pairs "$TARGET_PAIRS" \
+       --r1 "$MIX_R1" --r2 "$MIX_R2"; then
+    echo "[MERGE] exact audited mix exists, skip: $MIX_R1 / $MIX_R2"
+    exit 0
+  fi
+  echo "[ERROR] Existing mixed reads lack a matching exact-pair audit: $MIX_R1 / $MIX_R2" >&2
+  echo "        Rerun this row with --force; downstream QC/assembly from the old mix must also be regenerated." >&2
+  exit 1
 fi
 
 if [[ "$TARGET_PAIRS" -gt 0 ]]; then
   echo "[TARGET-SIM] sample=$SAMPLE target_pairs=$TARGET_PAIRS target_cov=$TARGET_COV seed=$TARGET_SEED"
-  bash "$RANDOMREADSMG_SH" \
-    -Xmx"${BBMAP_XMX:-4g}" t="${THREADS:-1}" overwrite=t \
+  rm -f -- "$TARGET_R1" "$TARGET_R2" "${TARGET_R1}.randomreads.log"
+  TARGET_SIM_TMP="$(mktemp -d "${RUN_DIR}/.target_sim.XXXXXX")"
+  cleanup_target_sim() {
+    [[ -z "${TARGET_SIM_TMP:-}" ]] || rm -rf -- "$TARGET_SIM_TMP"
+  }
+  trap cleanup_target_sim EXIT
+  (
+    cd "$TARGET_SIM_TMP"
+    bash "$RANDOMREADS_SH" \
+    -Xmx"${BBMAP_XMX:-4g}" overwrite=t \
     ref="$TARGET_FASTA" out="$TARGET_R1" out2="$TARGET_R2" \
-    reads="$TARGET_PAIRS" paired=t minlength="$READLEN" maxlength="$READLEN" seed="$TARGET_SEED" \
-    2> "${TARGET_R1}.randomreadsmg.log"
-  [[ -s "$TARGET_R1" && -s "$TARGET_R2" ]] || { echo "[ERROR] target randomreadsmg failed; see ${TARGET_R1}.randomreadsmg.log" >&2; exit 1; }
-  rm -f "$MIX_R1" "$MIX_R2"
-  cat "$BG_R1" "$TARGET_R1" > "$MIX_R1"
-  cat "$BG_R2" "$TARGET_R2" > "$MIX_R2"
-  if [[ "$KEEP_TARGET" -eq 0 ]]; then
-    rm -f "$TARGET_R1" "$TARGET_R2"
-  fi
+    reads="$TARGET_PAIRS" paired=t minlength="$READLEN" maxlength="$READLEN" \
+    seed="$TARGET_SEED" illuminanames=t zl=4 \
+    2> "${TARGET_R1}.randomreads.log"
+  )
+  cleanup_target_sim
+  trap - EXIT
+  [[ -s "$TARGET_R1" && -s "$TARGET_R2" ]] || { echo "[ERROR] target randomreads failed; see ${TARGET_R1}.randomreads.log" >&2; exit 1; }
 else
-  echo "[TARGET-SIM] target_pairs=0; mixed reads are symlinks to background reads"
-  rm -f "$MIX_R1" "$MIX_R2"
-  ln -s "$BG_R1" "$MIX_R1"
-  ln -s "$BG_R2" "$MIX_R2"
+  echo "[TARGET-SIM] target_pairs=0; writing an exact normalized background-only mix"
 fi
 
-[[ -s "$MIX_R1" && -s "$MIX_R2" ]] || { echo "[ERROR] merge failed: $MIX_R1 / $MIX_R2" >&2; exit 1; }
+MIX_ARGS=(
+  mix
+  --background-r1 "$BG_R1" --background-r2 "$BG_R2"
+  --background-source-pairs "$BG_SOURCE_PAIRS" --background-pairs "$BACKGROUND_PAIRS"
+  --target-pairs "$TARGET_PAIRS"
+  --out-r1 "$MIX_R1" --out-r2 "$MIX_R2"
+  --audit "$MIX_AUDIT" --seed "$MIX_SEED" --threads "${THREADS:-1}"
+)
+if [[ "$TARGET_PAIRS" -gt 0 ]]; then
+  MIX_ARGS+=(--target-r1 "$TARGET_R1" --target-r2 "$TARGET_R2" --target-source-pairs "$TARGET_PAIRS")
+fi
+python3 "$FASTQ_MIXER" "${MIX_ARGS[@]}"
+python3 "$FASTQ_MIXER" validate-mix \
+  --audit "$MIX_AUDIT" --expected-pairs "$TOTAL_PAIRS" \
+  --expected-background-pairs "$BACKGROUND_PAIRS" --expected-target-pairs "$TARGET_PAIRS" \
+  --r1 "$MIX_R1" --r2 "$MIX_R2"
+printf 'background_source_pairs\t%s\ntarget_simulator\t%s\nmixing_method\t%s\n' \
+  "$BG_SOURCE_PAIRS" "randomreads.sh_exact_total" "uniform_paired_interleave_single_gzip_member" >> "$MERGE_DESIGN"
+
+if [[ "$KEEP_TARGET" -eq 0 ]]; then
+  rm -f -- "$TARGET_R1" "$TARGET_R2"
+fi
+
+[[ -s "$MIX_R1" && -s "$MIX_R2" && -s "$MIX_AUDIT" ]] || { echo "[ERROR] exact paired mixing failed: $MIX_R1 / $MIX_R2" >&2; exit 1; }
 echo "[DONE] Mixed reads -> $MIX_R1 / $MIX_R2"

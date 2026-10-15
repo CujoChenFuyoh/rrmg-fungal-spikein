@@ -1,7 +1,7 @@
 """Install a built wheel in an isolated environment and exercise its real CLI.
 
 Uses temporary test data only. Run from repository root:
-  python tests/check_installed_wheel.py dist/rrmg_fungal_spikein-0.2.0-py3-none-any.whl
+  python tests/check_installed_wheel.py dist/rrmg_fungal_spikein-*.whl
 All platforms exercise the real Python collectors with missing inputs and
 two-row synthetic fixtures. Linux also checks the original runner with mock
 stage wrappers and the combined shell collector. No scheduler is called.
@@ -30,6 +30,12 @@ def main():
         names = z.namelist()
         assert any(n.endswith("_workflow/rrmg_run_local.sh") for n in names)
         assert any(n.endswith("_workflow/docs/INSTALL.zh-CN.md") for n in names)
+        figure_assets = ("runbook.sh", "RUNBOOK_FIGURES_README.txt", "rrmg_windows_r.sh",
+                         "rrmg_plot_common.R", "rrmg_plot_preview.R", "rrmg_plot_alignment.R",
+                         "rrmg_prepare_alignment_inputs.py")
+        for asset in figure_assets:
+            assert "rrmg_cli/_workflow/" + asset in names, "Missing figure asset: " + asset
+        assert "rrmg_cli/_workflow/rrmg_mix_paired_fastq.py" in names
         assert not any(n.endswith("/rrmg_config.sh") for n in names)
         assert not any("/_workflow/temp/" in n or "/_workflow/input/" in n for n in names)
         expected = z.read("rrmg_cli/_workflow/VERSION").decode().strip()
@@ -60,6 +66,13 @@ def main():
         assert envdir in installed.parents, installed
         export = root / "exported core"
         run("export", export)
+        for asset in figure_assets:
+            assert (export / asset).is_file(), "Missing exported figure asset: " + asset
+        runbook = (export / "runbook.sh").read_text(encoding="utf-8")
+        assert "RUNBOOK_DIR" not in runbook
+        assert 'FIG_OUT="$WD/figure_output/local_preview"' in runbook
+        assert 'ALIGN_INPUT="$WD/figure_data/CYP51A_alignment"' in runbook
+        assert 'ALIGN_FIG_OUT="$WD/figure_output/alignment_sites"' in runbook
         manifest = json.loads((export / "rrmg_core_manifest.json").read_text())
         for name, digest in manifest["sha256"].items():
             assert hashlib.sha256((export / name).read_bytes()).hexdigest() == digest

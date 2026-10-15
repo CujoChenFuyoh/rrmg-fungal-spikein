@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FASTQ_MIXER="${FASTQ_MIXER:-$SCRIPT_DIR/rrmg_mix_paired_fastq.py}"
 
 usage() {
   cat <<'USAGE'
@@ -75,10 +77,22 @@ done
 WD="$(mkdir -p "$WD" && cd "$WD" && pwd)"
 cd "$WD"
 [[ -s "$PLAN" ]] || { echo "[ERROR] Plan not found: $PLAN" >&2; exit 1; }
+[[ -s "$FASTQ_MIXER" ]] || { echo "[ERROR] FASTQ audit utility not found: $FASTQ_MIXER" >&2; exit 1; }
 if [[ -z "$KRAKEN_DB" ]]; then SKIP_KRAKEN=1; fi
 
 merge_intervals_cov_bp() {
   sort -k1,1n -k2,2n | awk 'BEGIN{cov=0;s=-1;e=-1} NR==1{s=$1;e=$2;next} {if($1<=e){if($2>e)e=$2}else{cov+=(e-s);s=$1;e=$2}} END{if(s!=-1)cov+=(e-s);print cov}'
+}
+
+marker_matches() {
+  local marker="$1" expected="$2"
+  [[ -s "$marker" && "$(tr -d '\r\n' < "$marker")" == "$expected" ]]
+}
+
+write_marker() {
+  local marker="$1" value="$2" temporary="${1}.tmp.$$"
+  printf '%s\n' "$value" > "$temporary"
+  mv -f -- "$temporary" "$marker"
 }
 
 kraken2_species_abundance() {
@@ -150,7 +164,11 @@ run_id=chosen.get('run_id') or f'{sample}__Seed{seed}'
 run_dir=wd/'temp'/'rrmg_permutation'/safe(run_id)
 readlen=chosen.get('readlen') or '150'
 species=chosen.get('species_name_for_kraken') or chosen.get('target_name') or ''
-vals={'RUN_ID':run_id,'SAMPLE':sample,'SEED':seed,'RUN_DIR':run_dir,'MIX_R1':run_dir/'reads'/f'{safe(sample)}.Seed{seed}_1.fastq.gz','MIX_R2':run_dir/'reads'/f'{safe(sample)}.Seed{seed}_2.fastq.gz','SPECIES_FROM_PLAN':species,'TARGET_ABUNDANCE':chosen.get('target_abundance',''),'TOTAL_PAIRS':chosen.get('total_pairs',''),'READLEN':readlen}
+total_pairs=chosen.get('total_pairs') or chosen.get('computed_total_pairs') or ''
+target_abundance=chosen.get('target_abundance','') or '0'
+target_pairs=int(round(float(total_pairs)*float(target_abundance))) if total_pairs else ''
+background_pairs=int(round(float(total_pairs)))-target_pairs if total_pairs else ''
+vals={'RUN_ID':run_id,'SAMPLE':sample,'SEED':seed,'RUN_DIR':run_dir,'MIX_R1':run_dir/'reads'/f'{safe(sample)}.Seed{seed}_1.fastq.gz','MIX_R2':run_dir/'reads'/f'{safe(sample)}.Seed{seed}_2.fastq.gz','SPECIES_FROM_PLAN':species,'TARGET_ABUNDANCE':target_abundance,'TOTAL_PAIRS':total_pairs,'TARGET_PAIRS_EXPECTED':target_pairs,'BACKGROUND_PAIRS_EXPECTED':background_pairs,'READLEN':readlen}
 for k,v in vals.items(): print(f'{k}={q(v)}')
 PY
 # shellcheck disable=SC1090
@@ -161,25 +179,73 @@ CONTIGS="${RUN_DIR}/asm/contigs.fasta"
 MAP_SUM="${RUN_DIR}/map/target_call_summary.tsv"
 SUCCESS_MARKER="${RUN_DIR}/STEP3_SUCCESS"
 MASTER="result/rrmg_split_pipeline_summary.tsv"
+MIX_AUDIT="${RUN_DIR}/design/read_mix_audit.tsv"
+FASTP_JSON="${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}.fastp.json"
+QC_PROVENANCE="${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}.mix_generation.txt"
+KRAKEN_PROVENANCE="${RUN_DIR}/kraken/${SAMPLE}.Seed${SEED}.mix_generation.txt"
+ASM_PROVENANCE="${RUN_DIR}/asm/RRMG_MIX_GENERATION"
+
+[[ -n "$TOTAL_PAIRS" ]] || { echo "[ERROR] Plan row has no total_pairs/computed_total_pairs" >&2; exit 1; }
+python3 "$FASTQ_MIXER" validate-mix --audit "$MIX_AUDIT" --expected-pairs "$TOTAL_PAIRS" \
+  --expected-background-pairs "$BACKGROUND_PAIRS_EXPECTED" --expected-target-pairs "$TARGET_PAIRS_EXPECTED"
+MIX_GENERATION="$(awk -F '\t' '$1=="mix_generation_id"{print $2}' "$MIX_AUDIT")"
 
 if [[ "$FORCE" -eq 0 && -s "$SUCCESS_MARKER" && -s "$CONTIGS" && -s "$MAP_SUM" && -s "$MASTER" ]] && \
    awk -F '\t' -v run_dir="$RUN_DIR" 'NR > 1 && $11 == run_dir {found=1} END {exit(found ? 0 : 1)}' "$MASTER"; then
+  [[ "$(awk -F '=' '$1=="mix_generation_id"{print $2}' "$SUCCESS_MARKER")" == "$MIX_GENERATION" ]] || {
+    echo "[ERROR] Step 3 outputs belong to an older Step 2 read-mix generation: $RUN_DIR" >&2
+    echo "        Rerun this row with --force; stale assembly/mapping will not be reused." >&2
+    exit 1
+  }
+  if [[ "$SKIP_QC" -eq 0 ]]; then
+    python3 "$FASTQ_MIXER" validate-fastp --json "$FASTP_JSON" --expected-pairs "$TOTAL_PAIRS"
+    marker_matches "$QC_PROVENANCE" "$MIX_GENERATION" || {
+      echo "[ERROR] Completed Step 3 has no matching QC provenance marker: $QC_PROVENANCE" >&2
+      exit 1
+    }
+  fi
+  if [[ "$SKIP_KRAKEN" -eq 0 ]]; then
+    [[ -s "${RUN_DIR}/kraken/${SAMPLE}.Seed${SEED}.report" ]] && \
+      marker_matches "$KRAKEN_PROVENANCE" "$MIX_GENERATION" || {
+        echo "[ERROR] Completed Step 3 has no matching Kraken2 result for the current mix." >&2
+        echo "        Rerun this row with --force to enable/rebuild Kraken2 output." >&2
+        exit 1
+      }
+  fi
   echo "[SKIP] Completed Step 3 result already exists: $RUN_DIR"
   exit 0
 fi
 
+# From this point the row is being rebuilt or resumed. A failed attempt must not
+# leave an older completion marker that could make the next attempt skip work.
+rm -f -- "$SUCCESS_MARKER"
+
 [[ -s "$MIX_R1" && -s "$MIX_R2" ]] || { echo "[ERROR] Mixed reads not found. Run step2 first: $MIX_R1 / $MIX_R2" >&2; exit 1; }
+python3 "$FASTQ_MIXER" validate-mix \
+  --audit "$MIX_AUDIT" --expected-pairs "$TOTAL_PAIRS" \
+  --expected-background-pairs "$BACKGROUND_PAIRS_EXPECTED" --expected-target-pairs "$TARGET_PAIRS_EXPECTED" \
+  --r1 "$MIX_R1" --r2 "$MIX_R2"
 mkdir -p "$RUN_DIR"/{qc,kraken,asm,map}
 
 QC_R1="$MIX_R1"; QC_R2="$MIX_R2"
 if [[ "$SKIP_QC" -eq 0 ]]; then
   QC_R1="${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}_1.fastq.gz"
   QC_R2="${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}_2.fastq.gz"
+  QC_REBUILT=0
   if [[ "$FORCE" -eq 0 && -s "$QC_R1" && -s "$QC_R2" ]]; then
+    marker_matches "$QC_PROVENANCE" "$MIX_GENERATION" || {
+      echo "[ERROR] Existing QC reads belong to an older/unaudited Step 2 mix. Rerun Step 3 with --force." >&2
+      exit 1
+    }
     echo "[REUSE] Existing QC reads: $QC_R1 / $QC_R2"
   else
-    run_fastp "$MIX_R1" "$MIX_R2" "$QC_R1" "$QC_R2" "${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}.fastp.json" "${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}.fastp.html"
+    rm -f -- "$QC_R1" "$QC_R2" "$FASTP_JSON" \
+      "${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}.fastp.html" "$QC_PROVENANCE"
+    run_fastp "$MIX_R1" "$MIX_R2" "$QC_R1" "$QC_R2" "$FASTP_JSON" "${RUN_DIR}/qc/${SAMPLE}.Seed${SEED}.fastp.html"
+    QC_REBUILT=1
   fi
+  python3 "$FASTQ_MIXER" validate-fastp --json "$FASTP_JSON" --expected-pairs "$TOTAL_PAIRS"
+  [[ "$QC_REBUILT" -eq 0 ]] || write_marker "$QC_PROVENANCE" "$MIX_GENERATION"
 fi
 
 KRAKEN_RPT="${RUN_DIR}/kraken/${SAMPLE}.Seed${SEED}.report"
@@ -187,9 +253,15 @@ KRAKEN_OUT="${RUN_DIR}/kraken/${SAMPLE}.Seed${SEED}.output"
 SPECIES_PCT="NA"; SPECIES_CLADE="NA"; SPECIES_TAXON="NA"; SPECIES_TAXID="NA"
 if [[ "$SKIP_KRAKEN" -eq 0 ]]; then
   if [[ "$FORCE" -eq 0 && -s "$KRAKEN_RPT" ]]; then
+    marker_matches "$KRAKEN_PROVENANCE" "$MIX_GENERATION" || {
+      echo "[ERROR] Existing Kraken2 report belongs to an older/unaudited read mix. Rerun Step 3 with --force." >&2
+      exit 1
+    }
     echo "[REUSE] Existing Kraken2 report: $KRAKEN_RPT"
   else
+    rm -f -- "$KRAKEN_RPT" "$KRAKEN_OUT" "$KRAKEN_PROVENANCE"
     run_kraken2 "$QC_R1" "$QC_R2" "$KRAKEN_RPT" "$KRAKEN_OUT"
+    write_marker "$KRAKEN_PROVENANCE" "$MIX_GENERATION"
   fi
   if [[ -n "$SPECIES_NAME" ]]; then
     read -r SPECIES_PCT SPECIES_CLADE SPECIES_TAXON SPECIES_TAXID < <(kraken2_species_abundance "$KRAKEN_RPT" "$SPECIES_NAME")
@@ -198,6 +270,10 @@ fi
 
 if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
   if [[ "$FORCE" -eq 0 && -s "$CONTIGS" ]]; then
+    marker_matches "$ASM_PROVENANCE" "$MIX_GENERATION" || {
+      echo "[ERROR] Existing assembly belongs to an older/unaudited read mix. Rerun Step 3 with --force." >&2
+      exit 1
+    }
     echo "[REUSE] Existing assembly: $CONTIGS"
   else
     if [[ "$FORCE" -eq 1 ]]; then
@@ -209,10 +285,15 @@ if [[ "$SKIP_ASSEMBLE" -eq 0 ]]; then
       exit 1
     fi
     run_metaspades "$QC_R1" "$QC_R2" "${RUN_DIR}/asm"
+    write_marker "$ASM_PROVENANCE" "$MIX_GENERATION"
   fi
 else
   [[ -s "$CONTIGS" ]] || {
     echo "[ERROR] --skip-assemble requires an existing non-empty file: $CONTIGS" >&2
+    exit 1
+  }
+  marker_matches "$ASM_PROVENANCE" "$MIX_GENERATION" || {
+    echo "[ERROR] --skip-assemble cannot reuse contigs from an older/unaudited read mix." >&2
     exit 1
   }
   echo "[REUSE] Assembly requested with --skip-assemble: $CONTIGS"
@@ -243,6 +324,6 @@ mkdir -p result
   mv -f -- "$MASTER_TMP" "$MASTER"
 ) 9>"${MASTER}.lock"
 
-printf 'run_id=%s\nrow_index=%s\ncompleted=%s\n' \
-  "$RUN_ID" "$ROW_INDEX" "$(date -Is)" > "$SUCCESS_MARKER"
+printf 'run_id=%s\nrow_index=%s\nmix_generation_id=%s\ncompleted=%s\n' \
+  "$RUN_ID" "$ROW_INDEX" "$MIX_GENERATION" "$(date -Is)" > "$SUCCESS_MARKER"
 echo "[DONE] Downstream summary -> $MASTER"

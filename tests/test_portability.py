@@ -18,7 +18,7 @@ class PortabilityTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.env = dict(os.environ)
-        for key in ("JAVA_HOME", "JAVA_BIN", "BBMAP_DIR", "RANDOMREADSMG_SH", "RRMG_CONFIG"):
+        for key in ("JAVA_HOME", "JAVA_BIN", "BBMAP_DIR", "RANDOMREADSMG_SH", "RANDOMREADS_SH", "RRMG_CONFIG"):
             self.env.pop(key, None)
 
     def run_tool(self, name, *args, ok=True):

@@ -24,4 +24,6 @@ cd /path/to/rrmg-fungal-spikein
 ROW="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-}}"
 [[ "$ROW" =~ ^[1-9][0-9]*$ ]] || { echo '[ERROR] Array index is unset/invalid' >&2; exit 1; }
 # One array task = one original plan ID. NEVER pass "1-$ROW" here.
-bash ./rrmg_submit.sh "${RRMG_STAGE:-step2}" "$ROW" --jobs 1
+RUN_ARGS=(-t "${RRMG_THREADS:-1}" --jobs 1)
+[[ -n "${RRMG_MEMORY_GB:-}" ]] && RUN_ARGS+=(-m "$RRMG_MEMORY_GB")
+bash ./rrmg_submit.sh "${RRMG_STAGE:-step2}" "$ROW" "${RUN_ARGS[@]}"

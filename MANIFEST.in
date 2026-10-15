@@ -2,6 +2,9 @@ include VERSION README.md CHANGELOG.md environment.yml .gitattributes .gitignore
 include rrmg_config.example.sh
 include rrmg_run_local.sh rrmg_submit.sh rrmg_preflight.sh
 include rrmg_run_one.sh rrmg_environment.sh
+include rrmg_mix_paired_fastq.py
+include runbook.sh RUNBOOK_FIGURES_README.txt rrmg_windows_r.sh
+include rrmg_plot_preview.R rrmg_plot_alignment.R rrmg_plot_common.R rrmg_prepare_alignment_inputs.py
 recursive-include examples *.sh *.pbs *.tsv *.md
 include rrmg_prepare_manifest.py rrmg_download_genomes.sh rrmg_test_randomreadsmg_genomes.sh
 include rrmg_make_plan.py rrmg_make_background_plan.py
@@ -16,7 +19,7 @@ include rrmg_collect_vamb_results.py rrmg_collect_supplementary_downstream.sh
 include rrmg_evaluate_vamb_bins.py rrmg_add_target_only_cyp51a_to_figure_data.py
 recursive-include docs *.md
 recursive-include .github *.yml *.yaml
-recursive-include tests *.py *.sh
+recursive-include tests *.py *.sh *.R
 recursive-include src/rrmg_cli *.py *.txt
 exclude rrmg_config.sh
 prune input
@@ -25,5 +28,6 @@ prune temp
 prune result
 prune logs
 prune figure_data
+prune figure_output
 prune .rrmg
 global-exclude __pycache__ *.py[cod]

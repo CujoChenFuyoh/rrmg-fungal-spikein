@@ -85,16 +85,23 @@ def detected_settings(args):
             pass
     # Defaults stay portable: resolve active PATH at runtime, not at installation.
     # Explicit overrides are local deployment choices, never release defaults.
-    randomreads = args.randomreadsmg
-    if not randomreads and args.bbmap_dir:
-        randomreads = str(Path(args.bbmap_dir).expanduser() / "randomreadsmg.sh")
-    bbmap = args.bbmap_dir or (str(Path(randomreads).resolve().parent) if randomreads else None)
+    randomreadsmg = args.randomreadsmg
+    randomreads = args.randomreads
+    if args.bbmap_dir:
+        randomreadsmg = randomreadsmg or str(Path(args.bbmap_dir).expanduser() / "randomreadsmg.sh")
+        randomreads = randomreads or str(Path(args.bbmap_dir).expanduser() / "randomreads.sh")
+    if not randomreads and randomreadsmg:
+        randomreads = str(Path(randomreadsmg).expanduser().parent / "randomreads.sh")
+    if not randomreadsmg and randomreads:
+        randomreadsmg = str(Path(randomreads).expanduser().parent / "randomreadsmg.sh")
+    bbmap = args.bbmap_dir or (str(Path(randomreadsmg).resolve().parent) if randomreadsmg else None)
     java = args.java_bin
     settings = {
         "CONDA_SH": resolved(conda_sh) if conda_sh else "",
         "RRMG_CONDA_ENV": args.env,
         "BBMAP_DIR": resolved(bbmap) if bbmap else "",
-        "RANDOMREADSMG_SH": resolved(randomreads) if randomreads else "",
+        "RANDOMREADSMG_SH": resolved(randomreadsmg) if randomreadsmg else "",
+        "RANDOMREADS_SH": resolved(randomreads) if randomreads else "",
         "JAVA_HOME": str(Path(java).resolve().parent.parent) if java else "",
         "JAVA_BIN": resolved(java) if java else "",
     }
@@ -119,7 +126,7 @@ def init_project(args):
     settings.update(PIPELINE_DIR=str(pipeline), WD=str(wd))
     template = (core_root() / "rrmg_config.example.sh").read_text(encoding="utf-8")
     for key, value in settings.items():
-        if key in ("JAVA_BIN", "JAVA_HOME", "BBMAP_DIR", "RANDOMREADSMG_SH") and not value:
+        if key in ("JAVA_BIN", "JAVA_HOME", "BBMAP_DIR", "RANDOMREADSMG_SH", "RANDOMREADS_SH") and not value:
             # Preserve template inheritance so PBS-job exports remain effective.
             continue
         if "\n" in value or "\r" in value:
@@ -173,9 +180,19 @@ def launch(args):
             raise ValueError("Use an original row index or a START-END range")
         if args.jobs is not None and args.jobs < 1:
             raise ValueError("--jobs must be positive")
+        if args.threads is not None and args.threads < 1:
+            raise ValueError("--threads must be positive")
+        if args.memory is not None and args.memory < 1:
+            raise ValueError("--memory must be a positive integer in GiB")
+        if args.memory is not None and args.step not in ("step1", "step2", "step3"):
+            raise ValueError("--memory is supported for step1/2/3 only; set scheduler memory for this step")
         forwarded = [args.step]
         if args.rows:
             forwarded.append(args.rows)
+        if args.threads is not None:
+            forwarded += ["--threads", str(args.threads)]
+        if args.memory is not None:
+            forwarded += ["--memory", str(args.memory)]
         if args.jobs is not None:
             forwarded += ["--jobs", str(args.jobs)]
         if args.dry_run:
@@ -211,7 +228,7 @@ def parser():
     q.add_argument("--config", type=Path, help="New config filename (default WORKDIR/rrmg_config.sh)")
     q.add_argument("--pipeline-dir", type=Path, help="Use existing checkout; otherwise export a versioned core snapshot")
     q.add_argument("--env", default="fungamr_meta")
-    for flag in ("conda-sh", "bbmap-dir", "randomreadsmg", "java-bin"):
+    for flag in ("conda-sh", "bbmap-dir", "randomreadsmg", "randomreads", "java-bin"):
         q.add_argument("--" + flag, help="Override auto-detected local path")
     q = sub.add_parser("export", help="Copy the original core scripts to a NEW directory")
     q.add_argument("destination", type=Path)
@@ -223,6 +240,8 @@ def parser():
         if name == "run":
             q.add_argument("step", choices=STEPS)
             q.add_argument("rows", nargs="?", help="Original row or START-END; omitted means all rows")
+            q.add_argument("-t", "--threads", type=int, help="Threads per row; overrides the step config")
+            q.add_argument("-m", "--memory", type=int, metavar="GB", help="Per-row GiB for step1/2 Java or step3 SPAdes")
             q.add_argument("--jobs", type=int)
             q.add_argument("--dry-run", action="store_true")
             q.add_argument("--force", action="store_true", help="Original destructive overwrite behavior; use deliberately")

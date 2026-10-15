@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.1 — 2026-10-15
+
+- Let each invocation override per-row threads with `-t/--threads`. Add
+  `-m/--memory GB` for the BBMap Java heap in Steps 1/2 and metaSPAdes in
+  Step 3, with no workflow-imposed maximum; scheduler memory remains external.
+- Bundle the step-by-step local runbook, R figures, WSL-to-Windows R launcher
+  and alignment-input preparation in both the repository and pip/export assets.
+- Use CODE for all scripts, with fixed figure_data/figure_output paths under WD.
+  Render/map in staging; replace only verified tool-owned output directories
+  after success, retaining previous outputs on failure and rejecting user edits.
+- Validate empty/missing annotation paths before mapping; document the three
+  gene PAF inputs and the separate target-only gene versus genome mapping.
+- Make depth overlays explicit: pale grey target-only fill, stronger orange
+  mixed-QC foreground, dashed/solid outlines, covered-base counts and separate
+  read-track opacity. Test identical/partial overlap and true-zero profiles.
+- Pin repository text files, including R scripts and package metadata, to LF
+  on checkout even when Windows Git has core.autocrlf=true. Exclude figure
+  outputs from Git and add a source line-ending regression check.
+- Replace byte-concatenated background/target gzip streams with deterministic
+  paired interleaving into one gzip member. Record exact background, target and
+  total counts plus output sizes in each run's read_mix_audit.tsv.
+- Use BBMap RandomReads for an exact whole-target pair total; uniformly
+  subsample oversized RandomReadsMG backgrounds to the designed count.
+- Fail closed when fastp did not consume exactly twice the planned pair count,
+  when target-only pairs differ from design, or when rebuilt reads would be
+  combined with stale QC, assembly or mapping outputs. Legacy unaudited mixes
+  must be rebuilt rather than silently reused.
+- Assign a new mix generation ID on every Step2 rebuild and propagate it through
+  QC, assembly and Step4/5 provenance markers, so file touching or preserved
+  mtimes cannot make stale downstream outputs look current.
+
 ## 0.3.0 — 2026-10-14
 
 - BREAKING: rrmg_submit.sh executes rows directly; it no longer calls qsub or

@@ -60,7 +60,7 @@ printf '%s\n' \
   > "$TEST_ROOT/fake_command.sh"
 chmod +x "$TEST_ROOT/fake_command.sh"
 
-for command_name in minimap2 samtools vamb randomreadsmg.sh; do
+for command_name in minimap2 samtools vamb randomreadsmg.sh randomreads.sh; do
   cp "$TEST_ROOT/fake_command.sh" "$FAKEBIN/$command_name"
 done
 cp "$TEST_ROOT/fake_command.sh" "$JAVA_HOME_FAKE/bin/java"
@@ -73,6 +73,7 @@ printf '%s\n' \
   'row="${RRMG_ROW_INDEX:?missing RRMG_ROW_INDEX}"' \
   '{' \
   '  printf "step=%s\nrow=%s\n" "$name" "$row"' \
+  '  printf "threads=%s\nbbmap_xmx=%s\n" "${THREADS:-}" "${BBMAP_XMX:-}"' \
   '  printf "args="' \
   '  printf "%q " "$@"' \
   '  printf "\n"' \
@@ -104,6 +105,7 @@ cp "$TEST_ROOT/fake_step.sh" "$PIPELINE/rrmg_evaluate_vamb_bins.py"
   printf 'RRMG_CONDA_ENV=%q\n' 'fungamr_meta_smoke'
   printf 'BBMAP_DIR=%q\n' "$FAKEBIN"
   printf 'RANDOMREADSMG_SH=%q\n' "$FAKEBIN/randomreadsmg.sh"
+  printf 'RANDOMREADS_SH=%q\n' "$FAKEBIN/randomreads.sh"
   printf 'JAVA_HOME=%q\n' "$JAVA_HOME_FAKE"
   printf 'JAVA_BIN=%q\n' "$JAVA_HOME_FAKE/bin/java"
   printf 'PLAN=%q\n' 'input/rrmg/rrmg_permutation_plan.tsv'
@@ -131,32 +133,53 @@ assert_file() {
   [[ -s "$1" ]] || { echo "[TEST ERROR] Expected file missing: $1" >&2; exit 1; }
 }
 
-run_local step1 1-2 --jobs 2
+run_local step1 1-2 --threads 3 --memory 7 --jobs 2
 assert_file "$CALLS/rrmg_step1_make_background_reads.sh.1.txt"
 assert_file "$CALLS/rrmg_step1_make_background_reads.sh.2.txt"
+grep -q '^threads=3$' "$CALLS/rrmg_step1_make_background_reads.sh.1.txt"
+grep -q '^bbmap_xmx=7g$' "$CALLS/rrmg_step1_make_background_reads.sh.1.txt"
 
-run_local step2 2-4 --jobs 2
+run_local step2 2-4 -t 1 -m 6 --jobs 2
 for row in 2 3 4; do
   assert_file "$CALLS/rrmg_step2_make_target_and_merge.sh.${row}.txt"
 done
 grep -q -- '--keep-target-reads' "$CALLS/rrmg_step2_make_target_and_merge.sh.2.txt"
+grep -q '^threads=1$' "$CALLS/rrmg_step2_make_target_and_merge.sh.2.txt"
+grep -q '^bbmap_xmx=6g$' "$CALLS/rrmg_step2_make_target_and_merge.sh.2.txt"
 
-run_local step3 1
-run_local step3b 1
-run_local step45 1
-run_local step4 2
-run_local step5 3
+run_local step3 1 -t 5 -m 37
+run_local step3b 1 -t 6
+run_local step45 1 -t 7
+run_local step4 2 -t 8
+run_local step5 3 -t 9
 grep -q -- "--skip-target-genome" "$CALLS/rrmg_step4_5_supplementary_downstream.sh.2.txt"
 grep -q -- "--skip-read-to-gene" "$CALLS/rrmg_step4_5_supplementary_downstream.sh.3.txt"
 assert_file "$CALLS/rrmg_step3_downstream_analysis.sh.1.txt"
 assert_file "$CALLS/rrmg_step3b_vamb_binning.sh.1.txt"
 assert_file "$CALLS/rrmg_step4_5_supplementary_downstream.sh.1.txt"
+grep -q -- '-t 5 -mem 37' "$CALLS/rrmg_step3_downstream_analysis.sh.1.txt"
+grep -q -- '-t 6' "$CALLS/rrmg_step3b_vamb_binning.sh.1.txt"
+grep -q '^threads=7$' "$CALLS/rrmg_step4_5_supplementary_downstream.sh.1.txt"
+grep -q '^threads=8$' "$CALLS/rrmg_step4_5_supplementary_downstream.sh.2.txt"
+grep -q '^threads=9$' "$CALLS/rrmg_step4_5_supplementary_downstream.sh.3.txt"
 
 run_local step2 1 --force
 grep -q -- '--force' "$CALLS/rrmg_step2_make_target_and_merge.sh.1.txt"
 
 if run_local step2 1-5 --dry-run >/dev/null 2>&1; then
   echo '[TEST ERROR] Out-of-range selection unexpectedly succeeded' >&2
+  exit 1
+fi
+if run_local step3 1 --threads 0 >/dev/null 2>&1; then
+  echo '[TEST ERROR] Zero threads unexpectedly succeeded' >&2
+  exit 1
+fi
+if run_local step3 1 --memory 0 >/dev/null 2>&1; then
+  echo '[TEST ERROR] Zero memory unexpectedly succeeded' >&2
+  exit 1
+fi
+if run_local step5 1 --memory 8 >/dev/null 2>&1; then
+  echo '[TEST ERROR] Unsupported Step5 memory override unexpectedly succeeded' >&2
   exit 1
 fi
 

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FASTQ_MIXER="${FASTQ_MIXER:-$SCRIPT_DIR/rrmg_mix_paired_fastq.py}"
 
 usage() {
   cat <<'USAGE'
@@ -80,6 +82,18 @@ cd "$WD"
 
 [[ -s "$PLAN" ]] || { echo "[ERROR] Plan not found: $PLAN" >&2; exit 1; }
 [[ -s "$GENE_REF" ]] || { echo "[ERROR] Gene reference not found: $GENE_REF" >&2; exit 1; }
+[[ -s "$FASTQ_MIXER" ]] || { echo "[ERROR] FASTQ audit utility not found: $FASTQ_MIXER" >&2; exit 1; }
+
+marker_matches() {
+  local marker="$1" expected="$2"
+  [[ -s "$marker" && "$(tr -d '\r\n' < "$marker")" == "$expected" ]]
+}
+
+write_marker() {
+  local marker="$1" value="$2" temporary="${1}.tmp.$$"
+  printf '%s\n' "$value" > "$temporary"
+  mv -f -- "$temporary" "$marker"
+}
 
 command -v "$MINIMAP2_BIN" >/dev/null 2>&1 || { echo "[ERROR] minimap2 not found: $MINIMAP2_BIN" >&2; exit 1; }
 command -v "$SAMTOOLS_BIN" >/dev/null 2>&1 || { echo "[ERROR] samtools not found: $SAMTOOLS_BIN" >&2; exit 1; }
@@ -189,6 +203,10 @@ if not r2.exists():
 map_dir = run_dir / "readmap"
 map_dir.mkdir(parents=True, exist_ok=True)
 
+total_pairs = chosen.get("total_pairs", "") or chosen.get("computed_total_pairs", "")
+target_abundance = chosen.get("target_abundance", "") or "0"
+target_pairs = int(round(float(total_pairs) * float(target_abundance))) if total_pairs else ""
+background_pairs = int(round(float(total_pairs))) - target_pairs if total_pairs else ""
 vals = {
     "ROW_INDEX": row_index,
     "RUN_ID": run_dir.name,
@@ -199,8 +217,10 @@ vals = {
     "MAP_DIR": str(map_dir),
     "SAMPLE": sample,
     "SEED": seed,
-    "TARGET_ABUNDANCE": chosen.get("target_abundance", ""),
-    "TOTAL_PAIRS": chosen.get("total_pairs", ""),
+    "TARGET_ABUNDANCE": target_abundance,
+    "TOTAL_PAIRS": total_pairs,
+    "TARGET_PAIRS_EXPECTED": target_pairs,
+    "BACKGROUND_PAIRS_EXPECTED": background_pairs,
 }
 for k, v in vals.items():
     print("{}={}".format(k, q(v)))
@@ -215,6 +235,7 @@ BAM="${PREFIX}.bam"
 DEPTH="${PREFIX}.depth.tsv"
 SUMMARY="${PREFIX}.coverage_summary.tsv"
 PAF_GZ="${PREFIX}.paf.gz"
+OUTPUT_PROVENANCE="${PREFIX}.mix_generation.txt"
 
 mkdir -p "$MAP_DIR"
 
@@ -229,12 +250,42 @@ echo "[INFO] MINIMAP2_BIN      = $MINIMAP2_BIN"
 echo "[INFO] SAMTOOLS_BIN      = $SAMTOOLS_BIN"
 echo "[INFO] MAKE_PAF          = $MAKE_PAF"
 
-if [[ "$FORCE" -eq 0 && -s "$SUMMARY" && -s "$DEPTH" ]]; then
-  echo "[SKIP] existing read-depth outputs: $SUMMARY"
-  exit 0
+[[ -n "$TOTAL_PAIRS" ]] || { echo "[ERROR] Plan row has no total_pairs/computed_total_pairs" >&2; exit 1; }
+MIX_AUDIT="${RUN_DIR}/design/read_mix_audit.tsv"
+if [[ "$USE_QC" -eq 1 ]]; then
+  python3 "$FASTQ_MIXER" validate-mix --audit "$MIX_AUDIT" --expected-pairs "$TOTAL_PAIRS" \
+    --expected-background-pairs "$BACKGROUND_PAIRS_EXPECTED" --expected-target-pairs "$TARGET_PAIRS_EXPECTED"
+  MIX_GENERATION="$(awk -F '\t' '$1=="mix_generation_id"{print $2}' "$MIX_AUDIT")"
+  FASTP_JSON="${R1%_1.fastq.gz}.fastp.json"
+  QC_PROVENANCE="${R1%_1.fastq.gz}.mix_generation.txt"
+  python3 "$FASTQ_MIXER" validate-fastp --json "$FASTP_JSON" --expected-pairs "$TOTAL_PAIRS"
+  marker_matches "$QC_PROVENANCE" "$MIX_GENERATION" || {
+      echo "[ERROR] QC reads/fastp report belong to an older/unaudited Step 2 mix." >&2
+      echo "        Rerun corrected Step 3 before supplementary read mapping." >&2
+      exit 1
+    }
+else
+  python3 "$FASTQ_MIXER" validate-mix \
+    --audit "$MIX_AUDIT" --expected-pairs "$TOTAL_PAIRS" \
+    --expected-background-pairs "$BACKGROUND_PAIRS_EXPECTED" --expected-target-pairs "$TARGET_PAIRS_EXPECTED" \
+    --r1 "$R1" --r2 "$R2"
+  MIX_GENERATION="$(awk -F '\t' '$1=="mix_generation_id"{print $2}' "$MIX_AUDIT")"
 fi
 
-rm -f "$BAM" "${BAM}.bai" "$DEPTH" "$SUMMARY" "$PAF_GZ"
+if [[ "$FORCE" -eq 0 && -s "$SUMMARY" && -s "$DEPTH" ]]; then
+  OUTPUTS_CURRENT=1
+  marker_matches "$OUTPUT_PROVENANCE" "$MIX_GENERATION" || OUTPUTS_CURRENT=0
+  if [[ "$MAKE_PAF" -eq 1 ]]; then
+    [[ -s "$PAF_GZ" ]] || OUTPUTS_CURRENT=0
+  fi
+  if [[ "$OUTPUTS_CURRENT" -eq 1 ]]; then
+    echo "[SKIP] existing audited read-depth outputs: $SUMMARY"
+    exit 0
+  fi
+  echo "[STALE] Existing Step 4 outputs do not match the current read-mix generation; regenerating them."
+fi
+
+rm -f "$BAM" "${BAM}.bai" "$DEPTH" "$SUMMARY" "$PAF_GZ" "$OUTPUT_PROVENANCE"
 
 echo "[MAP] reads -> target gene BAM"
 
@@ -352,4 +403,5 @@ with open(out_file, "w", newline="") as fh:
 PY
 
 [[ -s "$SUMMARY" ]] || { echo "[ERROR] Summary not created: $SUMMARY" >&2; exit 1; }
+write_marker "$OUTPUT_PROVENANCE" "$MIX_GENERATION"
 echo "[DONE] $SUMMARY"

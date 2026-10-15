@@ -1,6 +1,9 @@
 # 安装、从零准备输入与跨服务器运行
 
-版本 0.3.0。样品目录、实验 plan 和分析主体保持原结构；本次改变的是调度入口和软件路径解析。
+版本 0.3.1。样品目录和实验 plan 保持原结构；延续 0.3.0 的独立调度入口，新增精确 reads 计数/混合审计、随包 runbook、R 绘图、固定输出目录和输入路径检查。
+
+本地逐段测试及出图见 [runbook.sh](../runbook.sh) 第 0–15 段；所有脚本统一通过 `CODE` 调用。
+`.gitattributes` 将文本文件固定为 LF，不需要更改 Windows Git 的全局 `core.autocrlf`。
 
 **重要变化：`rrmg_submit.sh` 不再递交 PBS，而是直接运行任务。**
 激活环境后运行 `./rrmg_submit.sh step2 1-100`，默认顺序处理原 plan 中的 run_index 1–100。
@@ -33,7 +36,7 @@ python -m pip install 'git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.
 rrmg init --workdir /path/to/SpikeIN
 ```
 
-不指定 `--pipeline-dir` 时，核心代码冻结到 `.rrmg/core-0.3.0/`，防止以后的 pip 升级悄悄替换当前实验代码。
+不指定 `--pipeline-dir` 时，核心代码冻结到 `.rrmg/core-0.3.1/`，防止以后的 pip 升级悄悄替换当前实验代码。
 Git URL 只能安装已经推送的代码；本地改动使用 `pip install .`。
 可用 `rrmg export /path/to/new_core` 导出带校验清单的核心代码和 examples；不会覆盖已有目录。
 离线安装可先 `python -m pip wheel --no-deps . -w dist`，复制 wheel 后用 `pip install --no-index --no-deps 文件.whl`。
@@ -52,15 +55,20 @@ command -v java
 readlink -f "$(command -v java)"
 java -version
 command -v randomreadsmg.sh
+command -v randomreads.sh
 ```
 
 如果 BBMap 是另行安装、没有进入 PATH，可在私有配置中填写：
 
 ```bash
+BBMAP_DIR="/absolute/path/bbmap"
+# 或分别设置：
 RANDOMREADSMG_SH="/absolute/path/bbmap/randomreadsmg.sh"
+RANDOMREADS_SH="/absolute/path/bbmap/randomreads.sh"
 ```
 
-BBMap 目录需包含配套的 Java class 和辅助脚本；不能只复制一个 randomreadsmg.sh。
+Step1 用 RandomReadsMG 生成群落背景，Step2 用 RandomReads 为多 contig 目标生成精确的总 reads 对数。
+BBMap 目录需包含配套的 Java class 和辅助脚本；不能只复制单个 launcher。
 部分 PBS 系统需要在作业脚本中显式指定 Java。这个例外写在
 [普通 PBS](../examples/pbs.pbs) 和 [PBS array](../examples/pbs_array.pbs) 的注释示例里，
 放在 `conda activate` **之后**，按真实环境解析 `bin/java` 的符号链接；通常无需启用。
@@ -127,23 +135,26 @@ python3 "$PIPELINE_DIR/rrmg_make_background_plan.py" \
 
 结果是 1 个背景条件、2 个 permutation。兼容性测试会剔除失败背景并归一化；
 先核对 `randomreadsmg_genome_test/` 下的 summary/log，再决定是否接受群落变化。
-低深度用于检查能否执行，不要求一定检出目标基因。扩大规模前核对 FASTQ 实际对数、工具版本和参考基因组。
-本更新没有修正历史 reads 数量异常，也没有改变随机种子和 abundance 语义。
-部分 RandomReadsMG 版本把 `reads=N` 解释为每个 contig 的 reads 数，而不是整个 genome 的总数。
-多 contig 目标尤其要核对 Step5 的 `TargetPairsFastq` 与 `TargetPairsDesign`，不能直接把设计丰度当作实际丰度。
+低深度用于检查能否执行，不要求一定检出目标基因。扩大规模前核对 FASTQ 审计、工具版本和参考基因组。
+
+Step1 会记录背景 FASTQ 的实际来源对数；Step2 对背景作精确、均匀的下采样，用 RandomReads
+生成全目标基因组范围的精确总对数，再按固定 seed 成对交错写成每个 mate 只有一个 gzip member。
+`design/read_mix_audit.tsv` 记录设计数、实际数、输出大小和本次 mix generation ID。Step3 要求 fastp JSON 中
+`before_filtering.total_reads == 2 * total_pairs`；Step5 还会独立要求
+`TargetPairsFastq == TargetPairsDesign`。任一不一致都会停止，不会被当作未检出。
 
 ## 5. 相同入口用于直接运行、普通 PBS 和 array
 
 ```bash
 conda activate fungamr_meta
 cd "$PIPELINE_DIR"
-./rrmg_submit.sh step1
-./rrmg_submit.sh step2 1-2
-./rrmg_submit.sh step3 1-2
-./rrmg_submit.sh step4 1-2
-./rrmg_submit.sh step5 1-2
+./rrmg_submit.sh step1 1 -t 4 -m 4
+./rrmg_submit.sh step2 1-2 -t 1 -m 4
+./rrmg_submit.sh step3 1-2 -t 4 -m 16
+./rrmg_submit.sh step4 1-2 -t 4
+./rrmg_submit.sh step5 1-2 -t 4
 # 或在 Step3 后用 step45 1-2 一起做 Step4/5。
-# 可选：./rrmg_submit.sh step3b 1-2
+# 可选：./rrmg_submit.sh step3b 1-2 -t 4
 ```
 
 step1 的数字是 background plan 的 `bg_index`，其他步骤是原 permutation plan 的 `run_index`。
@@ -151,19 +162,24 @@ step1 的数字是 background plan 的 `bg_index`，其他步骤是原 permutati
 支持保留原编号的子集表；不自动重新编号。任何缺失/重复 ID 在开始计算前报错。
 `--dry-run` 只验证选择范围和入口，不会检查所有 FASTQ 是否完整。
 `rrmg_run_local.sh` 和 `rrmg run` 仍可用；三者共用同一核心分发逻辑。
+`-t/--threads` 可在每次运行时覆盖该步骤的线程数。Step1/2 的
+`-m/--memory GB` 设置 BBMap Java heap，Step3 则设置 metaSPAdes 内存。
+内存值只要求为正整数，不设人为上限。Step3b/4/5/45 没有可靠的程序总内存
+参数，因此会拒绝 `--memory`，避免产生已经限制内存的错觉。PBS/Slurm 的实际
+内存仍由用户在调度脚本中申请，不能由 `rrmg_submit.sh` 代替。
 
 普通 PBS 示例的计算部分是：
 
 ```bash
 conda activate fungamr_meta
-./rrmg_submit.sh step2 1-100 --jobs 1
+./rrmg_submit.sh step2 1-100 -t 1 -m 4 --jobs 1
 ```
 
 支持 array 时，每个子任务只运行自己的 ID：
 
 ```bash
 ROW="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-}}"
-./rrmg_submit.sh step2 "$ROW" --jobs 1
+./rrmg_submit.sh step2 "$ROW" -t 1 -m 4 --jobs 1
 ```
 
 **不能写成 `1-$ROW`**，否则每个 array 子任务都会重复处理前面样品。
@@ -176,16 +192,21 @@ PBS 的 queue/account/resource 语法由用户按服务器调整，核心流程�
 ```bash
 conda activate fungamr_meta
 export RRMG_CONFIG=/path/to/existing/rrmg_config.sh
-rrmg run step2 409-480 --dry-run
-rrmg run step2 409-480 --jobs 1
-rrmg run step2 225-230 --jobs 1
+rrmg run step2 409-480 -t 1 -m 4 --dry-run
+rrmg run step2 409-480 -t 1 -m 4 --jobs 1
+rrmg run step2 225-230 -t 1 -m 4 --jobs 1
 # 相应完成后，按同样范围运行 step3，再 step45。
 ```
 
 原输入、背景 FASTQ/index、plan 中的绝对路径仍需有效，clone/pip 不会迁移这些数据。
 旧配置的 `/EDIT_ME/` 或失效 Java 路径需清空或修正；在调用前主动激活环境。
 保留 `STEP2_KEEP_TARGET_READS=1` 供 Step5 使用。不要同时操作同一个样品，或重建仍被消费的背景。
-默认沿用各步骤原有复用条件；`--force` 才显式重跑，可能删除指定样品已有 assembly/binning。
+当前 Step2 只复用带精确计数/路径/大小审计的混合 reads；每次重建还会产生新的 mix generation ID，
+Step3–5 会同时核对 fastp/target 计数及上下游 generation 标记，不依赖文件 mtime 判断来源。
+旧结果没有 `read_mix_audit.tsv` 时会被拒绝，而不是静默复用。修复旧 row 时，先用新版 Step1
+运行一次以给已有背景计数（不会重生成），再依次用 `--force` 重跑 Step2、Step3 和 Step4/5；
+不能把新混合 reads 与旧 QC、assembly 或 mapping 拼接使用。
+`--force` 可能删除指定样品已有 assembly/binning，只对已核对的 row 使用。
 每次执行都有 `logs/local/.../summary.tsv` 和 `row_N.log`，部分失败时继续尝试其余选定样品，最终返回非零。
 Step3 是 fastp QC，不是 FastQC；Step5 的 coverage bins 不是 VAMB genome bins。
 Step3 的空 VCF/`VarN=0` 仍是占位，不能当作完成 fungAMR 突变检测。

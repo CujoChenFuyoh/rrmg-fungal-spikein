@@ -9,6 +9,7 @@ rrmg_config.example.sh
 rrmg_run_local.sh
 rrmg_run_one.sh
 rrmg_environment.sh
+rrmg_mix_paired_fastq.py
 examples/local.sh
 examples/pbs.pbs
 examples/pbs_array.pbs
@@ -40,3 +41,10 @@ rrmg_collect_vamb_results.py
 rrmg_collect_supplementary_downstream.sh
 rrmg_evaluate_vamb_bins.py
 rrmg_add_target_only_cyp51a_to_figure_data.py
+runbook.sh
+RUNBOOK_FIGURES_README.txt
+rrmg_windows_r.sh
+rrmg_plot_common.R
+rrmg_plot_preview.R
+rrmg_plot_alignment.R
+rrmg_prepare_alignment_inputs.py

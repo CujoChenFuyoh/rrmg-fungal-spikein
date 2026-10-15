@@ -33,11 +33,17 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("rrmg_config.sh", names)
         self.assertIn("rrmg_run_local.sh", names)
         for p in source.glob("rrmg_*"):
-            if p.suffix in (".sh", ".pbs", ".py") and p.name != "rrmg_config.sh":
+            if p.suffix in (".sh", ".pbs", ".py", ".R") and p.name != "rrmg_config.sh":
                 self.assertIn(p.name, names)
+        self.assertIn("runbook.sh", names)
+        self.assertIn("RUNBOOK_FIGURES_README.txt", names)
         self.assertEqual((source / "VERSION").read_text().strip(), cli.__version__)
 
     def test_export_preserves_original_core_bytes(self):
+        # Root sources (including R and extensionless metadata) stay portable
+        # even when checked out with Windows Git's core.autocrlf=true.
+        for name in cli.core_names():
+            self.assertNotIn(b"\r\n", (cli.core_root() / name).read_bytes(), name)
         target = self.root / "export"
         self.assertEqual(self.call("export", target), 0)
         expected = cli.inventory(cli.core_root())
@@ -92,13 +98,16 @@ class CLITests(unittest.TestCase):
         self.assertEqual(settings["CONDA_SH"], "")
         self.assertEqual(settings["JAVA_BIN"], "")
         self.assertEqual(settings["RANDOMREADSMG_SH"], "")
+        self.assertEqual(settings["RANDOMREADS_SH"], "")
 
     def test_explicit_tool_paths_are_retained(self):
         args = cli.parser().parse_args(["init", "--workdir", str(self.root), "--conda-sh", str(self.root / "conda.sh"),
                                         "--randomreadsmg", str(self.root / "bbmap/randomreadsmg.sh"),
+                                        "--randomreads", str(self.root / "bbmap/randomreads.sh"),
                                         "--java-bin", str(self.root / "java/bin/java")])
         settings = cli.detected_settings(args)
         self.assertEqual(settings["BBMAP_DIR"], str((self.root / "bbmap").resolve()))
+        self.assertEqual(settings["RANDOMREADS_SH"], str((self.root / "bbmap/randomreads.sh").resolve()))
         self.assertEqual(settings["JAVA_HOME"], str((self.root / "java").resolve()))
 
     def test_run_dispatches_original_runner_without_qsub(self):
@@ -106,10 +115,10 @@ class CLITests(unittest.TestCase):
         config.write_text("# test\n")
         with patch.object(cli.sys, "platform", "linux"), patch.object(cli.shutil, "which", return_value="/bin/bash"), \
              patch.object(cli.os, "execvpe") as run:
-            self.assertEqual(self.call("run", "step2", "451-480", "--jobs", "1", "--dry-run", "--config", config), 0)
+            self.assertEqual(self.call("run", "step2", "451-480", "-t", "1", "-m", "8", "--jobs", "1", "--dry-run", "--config", config), 0)
         name, argv, env = run.call_args.args
         self.assertEqual(name, "bash")
-        self.assertEqual(argv[4:], [str(config.resolve()), "rrmg_run_local.sh", "step2", "451-480", "--jobs", "1", "--dry-run"])
+        self.assertEqual(argv[4:], [str(config.resolve()), "rrmg_run_local.sh", "step2", "451-480", "--threads", "1", "--memory", "8", "--jobs", "1", "--dry-run"])
         self.assertEqual(env["RRMG_CONFIG"], str(config.resolve()))
         self.assertNotIn("qsub", argv)
         self.assertNotIn("--force", argv)
@@ -152,6 +161,9 @@ class CLITests(unittest.TestCase):
              patch.object(cli.os, "execvpe") as execute:
             self.assertEqual(self.call("run", "step3", "1,2", "--config", config), 1)
             self.assertEqual(self.call("run", "step3", "1", "--jobs", "0", "--config", config), 1)
+            self.assertEqual(self.call("run", "step3", "1", "--threads", "0", "--config", config), 1)
+            self.assertEqual(self.call("run", "step3", "1", "--memory", "0", "--config", config), 1)
+            self.assertEqual(self.call("run", "step5", "1", "--memory", "8", "--config", config), 1)
         execute.assert_not_called()
 
     def test_script_arguments_and_failure_status_are_preserved(self):

@@ -17,19 +17,24 @@ STEP:
   step45  optional read-depth and target-genome coverage analyses
 
 Options:
-  -j, --jobs N   Run at most N rows concurrently (default: LOCAL_JOBS or 1)
-  --force        Override the selected step's force setting for this run
-  --dry-run      Validate inputs and print rows without running them
-  -h, --help     Show this help
+  -t, --threads N   Threads per row; overrides the selected step's config value
+  -m, --memory GB   Per-row memory in GiB for step1/2 Java or step3 SPAdes
+                   (positive integer, no workflow-imposed maximum)
+  -j, --jobs N      Run at most N rows concurrently (default: LOCAL_JOBS or 1)
+  --force           Override the selected step's force setting for this run
+  --dry-run         Validate inputs and print rows without running them
+  -h, --help        Show this help
 
 Examples:
   ./rrmg_run_local.sh step1
   ./rrmg_run_local.sh step2 215-480
-  ./rrmg_run_local.sh step2 215-480 --jobs 4
-  ./rrmg_run_local.sh step3 215 --force
+  ./rrmg_run_local.sh step2 215-480 -t 1 -m 4 --jobs 4
+  ./rrmg_run_local.sh step3 215 --threads 16 --memory 64 --force
 
 Activate the analysis environment first. This runner never uses qsub or .pbs
 files. ROW is run_index (bg_index for step1), not Seed or a text line number.
+--memory controls supported application settings; PBS/Slurm memory must still be
+requested in the scheduler script. step3b/4/5/45 have no total-memory CLI cap.
 USAGE
 }
 
@@ -43,12 +48,24 @@ if [[ "$STEP" == "-h" || "$STEP" == "--help" ]]; then
 fi
 
 RANGE=""
+CLI_THREADS=""
+CLI_MEMORY_GB=""
 CLI_JOBS=""
 FORCE=""
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -t|--threads)
+      [[ $# -ge 2 ]] || { echo "[ERROR] $1 requires a value" >&2; exit 1; }
+      CLI_THREADS="$2"
+      shift 2
+      ;;
+    -m|--memory)
+      [[ $# -ge 2 ]] || { echo "[ERROR] $1 requires a value" >&2; exit 1; }
+      CLI_MEMORY_GB="$2"
+      shift 2
+      ;;
     -j|--jobs)
       [[ $# -ge 2 ]] || { echo "[ERROR] $1 requires a value" >&2; exit 1; }
       CLI_JOBS="$2"
@@ -98,6 +115,27 @@ JOBS="${CLI_JOBS:-${LOCAL_JOBS:-1}}"
   echo "[ERROR] --jobs must be a positive integer: $JOBS" >&2
   exit 1
 }
+if [[ -n "$CLI_THREADS" && ! "$CLI_THREADS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[ERROR] --threads must be a positive integer: $CLI_THREADS" >&2
+  exit 1
+fi
+if [[ -n "$CLI_MEMORY_GB" && ! "$CLI_MEMORY_GB" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[ERROR] --memory must be a positive integer in GiB: $CLI_MEMORY_GB" >&2
+  exit 1
+fi
+if [[ -n "$CLI_MEMORY_GB" ]]; then
+  case "$STEP" in
+    step1|step2|step3) ;;
+    *)
+      echo "[ERROR] --memory has no application-level meaning for $STEP." >&2
+      echo "        Request memory in the scheduler script; omit --memory for this step." >&2
+      exit 1
+      ;;
+  esac
+fi
+if [[ "$STEP" == step2 && -n "$CLI_THREADS" && "$CLI_THREADS" -ne 1 ]]; then
+  echo "[WARN] Step2 uses one thread by default for fixed-seed reproducibility." >&2
+fi
 
 case "$STEP" in
   step1)
@@ -158,7 +196,9 @@ if selection:
     missing = sorted(set(chosen) - set(ids))
     if missing:
         raise SystemExit('[ERROR] Indices absent from plan: ' + str(missing))
-print('\n'.join(map(str, chosen)))
+# Write explicit LF bytes so Git Bash never receives a stray CR when a Windows
+# Python executable is used for local validation.
+sys.stdout.buffer.write(('\n'.join(map(str, chosen))).encode())
 PY
 )"
 mapfile -t ROWS <<< "$ROWS_TEXT"
@@ -169,7 +209,7 @@ mkdir -p "$LOG_DIR"
 SUMMARY="$LOG_DIR/summary.tsv"
 printf 'row_index\tstatus\n' > "$SUMMARY"
 
-echo "[LOCAL] step=$STEP selection=${RANGE:-all} rows=${#ROWS[@]} jobs=$JOBS force=${FORCE:-from-config}"
+echo "[LOCAL] step=$STEP selection=${RANGE:-all} rows=${#ROWS[@]} jobs=$JOBS threads=${CLI_THREADS:-from-config} memory_gb=${CLI_MEMORY_GB:-from-config/not-applicable} force=${FORCE:-from-config}"
 echo "[LOCAL] table=$TABLE"
 echo "[LOCAL] logs=$LOG_DIR"
 if (( JOBS > 1 )); then
@@ -182,6 +222,8 @@ run_row() {
   RRMG_CONFIG="$CONFIG" \
   RRMG_ROW_INDEX="$row" \
   RRMG_LOG_DIR="$LOG_DIR" \
+  RRMG_THREADS_OVERRIDE="$CLI_THREADS" \
+  RRMG_MEMORY_GB_OVERRIDE="$CLI_MEMORY_GB" \
   RRMG_FORCE_OVERRIDE="$FORCE" \
     bash "$WRAPPER_PATH" "$STEP" "$row" > "$LOG_DIR/row_${row}.log" 2>&1
 }

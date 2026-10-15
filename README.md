@@ -1,10 +1,15 @@
 # RRMG fungal spike-in permutation workflow
 
-Version: `0.3.0` · [GitHub](https://github.com/CujoChenFuyoh/rrmg-fungal-spikein) · [中文教程](docs/INSTALL.zh-CN.md)
+Version: `0.3.1` · [GitHub](https://github.com/CujoChenFuyoh/rrmg-fungal-spikein) · [中文教程](docs/INSTALL.zh-CN.md)
 
 Simulate a reusable metagenomic background, spike in a fungal target across
 abundance × depth × seed combinations, then perform QC, assembly, gene mapping
 and read coverage analysis. One-sample VAMB binning is optional.
+
+> **New in 0.3.1:** exact target/background pair normalization, reproducible
+> paired-read interleaving into one gzip member, and fail-closed Step2–5 count
+> audits. The release also bundles the local runbook and R plotting scripts,
+> fixes figure paths under `WD`, and pins repository text to LF line endings.
 
 > **Changed in 0.3.0:** `rrmg_submit.sh` now runs selected rows directly. It never
 > calls `qsub` or executes PBS files. Activate your environment first. Scheduling
@@ -14,7 +19,14 @@ and read coverage analysis. One-sample VAMB binning is optional.
 > **Scientific limitation:** Step3 writes an empty VCF placeholder and `VarN=0`.
 > It measures gene recovery, NOT validated fungAMR mutation calls. Collectors
 > merge existing results; a successful collection does NOT prove every planned
-> replicate has finished. Read-count semantics are unchanged by this release.
+> replicate has finished.
+>
+> **Historical-output warning:** older `cat background.gz target.gz` mixtures can
+> be truncated by fastp at an internal gzip/BGZF EOF marker; see the related
+> [upstream report](https://github.com/OpenGene/fastp/issues/711). Current Step2
+> rewrites a single-member gzip and records `read_mix_audit.tsv`; Step3/4 require
+> `fastp before_filtering.total_reads == 2 * planned_pairs`, and Step5 requires
+> exact target-only pairs. Runs without these audits are deliberately not reused.
 
 ## Workflow and files
 
@@ -25,17 +37,77 @@ and read coverage analysis. One-sample VAMB binning is optional.
 | Test genomes | `rrmg_test_randomreadsmg_genomes.sh` | Downloaded manifest, FASTA, BBMap | Tested manifest and per-genome test logs |
 | Plan | `rrmg_make_plan.py` | Tested manifest, target genome, design parameters | Permutation plan |
 | Background plan | `rrmg_make_background_plan.py` | Permutation plan, genomes | Background plan, index and per-condition design |
-| step1 | `rrmg_step1_make_background_reads.sh` | Background plan/design, genomes | Reusable background FASTQ pairs |
-| step2 | `rrmg_step2_make_target_and_merge.sh` | Plan, background index/FASTQ, target genome | Target-only reads, mixed reads, merge design |
+| step1 | `rrmg_step1_make_background_reads.sh` | Background plan/design, genomes | Reusable background FASTQ pairs and exact source-pair audit |
+| step2 | `rrmg_step2_make_target_and_merge.sh` | Plan, background index/FASTQ, target genome | Exact target/background mixture, merge design and read-mix audit |
 | step3 | `rrmg_step3_downstream_analysis.sh` | Mixed reads, gene FASTA | fastp QC, metaSPAdes contigs, contig-to-gene mapping |
 | step4 | `rrmg_step4_reads_to_gene_depth.sh` | Plan/design, QC reads, gene FASTA | Gene depth and coverage summary |
 | step5 | `rrmg_step5_afum_target_reads_genome_cov.sh` | Plan/design, target-only reads, target genome | Genome coverage and optional coverage windows |
 | step45 | `rrmg_step4_5_supplementary_downstream.sh` | Inputs for step4 + step5 | Both supplementary analyses |
 | step3b (optional) | `rrmg_step3b_vamb_binning.sh` | QC reads, contigs, target genome from design | VAMB bins and recovery metrics |
 | Collect | `rrmg_collect_*.py`, `rrmg_collect_supplementary_downstream.sh` | Existing per-run results | Merged TSVs |
+| Summary figures | `rrmg_plot_preview.R` | Plan, merged TSVs, per-base gene depths | PNG/PDF, source data, completeness audit |
+| Alignment figure inputs | `rrmg_prepare_alignment_inputs.py` | Contigs, QC + retained target-only reads, gene FASTA; optional site + catalogue TSVs | Three gene PAFs, depths, portable manifest and site audit |
+| Alignment/site figures | `rrmg_plot_alignment.R` | Completed alignment figure inputs | PNG/PDF read blocks + depth/contig figures, site coverage tables |
 
 Step5 coverage windows are not metagenomic bins. VAMB is a separate optional step.
 Step3 QC uses **fastp**, not FastQC. Enable Kraken2 only when its database is available.
+
+### Local runbook and figures
+
+[runbook.sh](runbook.sh) contains numbered commands from manifest/download through
+Step1–5, collection, audits and figures. Open it and run sections interactively;
+do not run its initialization sections against an existing study. All scripts
+are in this repository and included in `pip` / `rrmg export` / `rrmg init` core
+snapshots. Set `CODE` to that directory and `WD` to the analysis directory;
+no separate runbook directory is required.
+
+Runbook sections **13–15** use Windows `Rscript.exe` from WSL, with the existing
+Windows R package library. Set `WIN_RSCRIPT` (WSL path to the executable) and
+`WIN_R_LIB` (Windows library path) in section 0 for your workstation. This does
+not make Linux R load Windows binaries. Native R can run the same `.R` scripts
+directly when its own packages are installed. See [figure notes](RUNBOOK_FIGURES_README.txt).
+
+```bash
+# WSL: existing analysis only; no PBS submission and no Step1–5 rerun.
+bash "$CODE/rrmg_windows_r.sh" --check
+bash "$CODE/rrmg_windows_r.sh" "$CODE/rrmg_plot_preview.R" \
+    "$WD" "$WD/figure_output/local_preview"
+
+# Section 14 generates the alignment inputs; section 15 renders them.
+# Do not run the following command until section 14 reports [DONE].
+bash "$CODE/rrmg_windows_r.sh" "$CODE/rrmg_plot_alignment.R" \
+    "$WD/figure_data/CYP51A_alignment" "$WD/figure_output/alignment_sites"
+```
+
+Outputs have **fixed names without dates**, all under `WD`:
+
+```text
+figure_data/CYP51A_alignment/       # manifest, reference, three PAFs/run, depths, site audit
+figure_output/local_preview/       # summary PNG/PDF + source and audit TSVs
+figure_output/alignment_sites/     # alignment_depth/, read_blocks/, site coverage TSVs
+```
+
+Successful reruns replace only the same helper's inventoried output directory,
+removing stale pages/rows. Rendering/mapping failures leave the previous complete
+results intact; require the current invocation's success message, not just an old
+completion marker. Unmanaged directories or manually changed/added files cause
+a refusal: preserve/move that directory first. Do not delete the hidden inventory.
+Section 14 rebuilds the selected `run_index` rows, not an append; skip it when
+only replotting unchanged inputs. It requires retained Step2 target-only reads
+and Step3 QC reads, does not regenerate missing FASTQs, and does not delete or
+modify original Step1–5 outputs. The mapping bundle's `COMPLETE.json` is written
+after all selected rows succeed.
+
+The read-block inputs are `reads_to_GENE.paf.gz` (mixed QC) and
+`target_only_reads_to_GENE.paf.gz`, plus `contigs_to_GENE.paf`, within each
+`row_XXXXX/`. Step5's target-genome mapping cannot replace target-only gene
+mapping. An empty `CATALOGUE_SOURCE` previously became the directory `.`; the
+current script rejects empty/non-file paths explicitly. Site labels show
+reference positions and coverage, not detected mutations or resistance phenotypes.
+Depth overlays use target-only alpha 0.20 and mixed-QC alpha 0.45, with orange
+drawn last and separate dashed grey / solid orange outlines. Subtitles report
+covered bases explicitly. Read-block sources occupy separate tracks and use
+alpha 0.50 / 0.90; changing opacity never converts a true zero into a hit.
 
 ```text
 SpikeIN/
@@ -78,7 +150,7 @@ python -m pip install 'git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.
 rrmg init --workdir "$HOME/SpikeIN"
 ```
 
-Without `--pipeline-dir`, init exports a versioned `.rrmg/core-0.3.0/` snapshot.
+Without `--pipeline-dir`, init exports a versioned `.rrmg/core-0.3.1/` snapshot.
 Existing configs/data are never overwritten. To pin code, replace `main` with
 a tested, pushed commit SHA. Local edits are installed by `pip install .`, not
 a Git URL. This package is not automatically published to PyPI.
@@ -101,9 +173,10 @@ rrmg doctor --config "$RRMG_CONFIG"
 ```
 
 Only `PIPELINE_DIR` and `WD` must be site-specific. Tool overrides normally stay
-empty: Java and `randomreadsmg.sh` resolve from the active PATH. If BBMap is
-installed separately, set `RANDOMREADSMG_SH=/absolute/path/bbmap/randomreadsmg.sh`
-in your private config (or `BBMAP_DIR` for PATH lookup). No environment change is needed.
+empty: Java, `randomreadsmg.sh` (background) and `randomreads.sh` (exact target)
+resolve from the active PATH. If BBMap is installed separately, set
+`BBMAP_DIR=/absolute/path/bbmap`, or set both `RANDOMREADSMG_SH` and
+`RANDOMREADS_SH` in the private config. No environment change is needed.
 Some PBS systems need explicit Java selection; see the commented block in both
 [PBS examples](examples/README.md). Release configs contain no machine's Java path.
 
@@ -188,12 +261,14 @@ python3 "$PIPELINE_DIR/rrmg_make_background_plan.py" \
 
 This design yields one shared background condition and two permutation rows.
 A low-depth pilot tests execution, not expected CYP51A recovery.
-Record the actual FASTQ pair counts, tool versions and design parameters before
-scaling up; the runner does not certify the simulator's read-count semantics.
-Some RandomReadsMG releases interpret `reads=N` per contig rather than per
-genome. For multi-contig targets compare Step5 `TargetPairsFastq` with
-`TargetPairsDesign`; do not assume designed and realized abundances are equal.
-This release does not silently change the simulation model for existing studies.
+Step1 records the source background pair count because RandomReadsMG can emit
+more than the requested count for a multi-contig community. Step2 uniformly
+subsamples that source to the planned background count, uses BBMap RandomReads
+for an exact whole-target total, and reproducibly interleaves both mates. It
+writes `design/read_mix_audit.tsv`; Step3 verifies that fastp consumed every
+planned pair, while Step5 independently requires `TargetPairsFastq ==
+TargetPairsDesign`. Any mismatch stops the row instead of becoming a biological
+zero. Record tool versions, audits and reference checksums before scaling up.
 
 ## 5. Run directly (no PBS)
 
@@ -203,13 +278,13 @@ needed for a contiguous range.
 ```bash
 conda activate fungamr_meta
 cd "$PIPELINE_DIR"
-bash ./rrmg_submit.sh step1
-bash ./rrmg_submit.sh step2 1-2
-bash ./rrmg_submit.sh step3 1-2
-bash ./rrmg_submit.sh step4 1-2
-bash ./rrmg_submit.sh step5 1-2
+bash ./rrmg_submit.sh step1 1 -t 4 -m 4
+bash ./rrmg_submit.sh step2 1-2 -t 1 -m 4
+bash ./rrmg_submit.sh step3 1-2 -t 4 -m 16
+bash ./rrmg_submit.sh step4 1-2 -t 4
+bash ./rrmg_submit.sh step5 1-2 -t 4
 # step45 1-2 is equivalent to step4 followed by step5 for each row.
-# Optional, after QC and assembly: bash ./rrmg_submit.sh step3b 1-2
+# Optional, after QC and assembly: bash ./rrmg_submit.sh step3b 1-2 -t 4
 ```
 
 After `chmod +x rrmg_submit.sh`, `./rrmg_submit.sh step2 1-100` is identical.
@@ -218,13 +293,19 @@ Selection is the original `run_index`, or **bg_index for step1**; it is not
 Seed, target-species ID or a text line number including the header. A single
 integer runs exactly one row. Omitted range runs all IDs in that stage's table.
 Missing/duplicate IDs fail before launch; sparse tables retain original IDs.
+`-t/--threads` overrides the selected step's configured threads for this run.
+For Steps 1 and 2, `-m/--memory GB` sets the BBMap Java heap; for Step 3 it
+sets the metaSPAdes memory value. It accepts any positive integer and imposes
+no workflow maximum. Steps 3b/4/5/45 do not expose a reliable total-memory cap,
+so `--memory` is rejected there rather than silently ignored. Scheduler memory
+must always be requested separately in the PBS/Slurm script.
 
 ```bash
-bash ./rrmg_submit.sh step2 409-480 --dry-run
-bash ./rrmg_submit.sh step2 409-480 --jobs 1
-bash ./rrmg_submit.sh step2 225-230 --jobs 1
+bash ./rrmg_submit.sh step2 409-480 -t 1 -m 4 --dry-run
+bash ./rrmg_submit.sh step2 409-480 -t 1 -m 4 --jobs 1
+bash ./rrmg_submit.sh step2 225-230 -t 1 -m 4 --jobs 1
 # Explicit replacement, only after inspecting the selected rows:
-# bash ./rrmg_submit.sh step2 409-480 --force
+# bash ./rrmg_submit.sh step2 409-480 -t 1 -m 4 --force
 ```
 
 Do not run overlapping invocations on the same stage/row or regenerate a
@@ -258,12 +339,18 @@ Do not submit all stages together without validated dependencies.
 
 ## 7. Resume, collect and preserve results
 
-Defaults reuse outputs according to the existing stage checks (often non-empty
-files, not checksums). Step3 writes STEP3_SUCCESS after mapping/summary completion;
-Step3B uses VAMB_SUCCESS. Step4/5 reuse per-run summaries. Keep target-only
-reads (`STEP2_KEEP_TARGET_READS=1`) until Step5. Nothing in the new runner
-automatically deletes reads. `--force` replaces selected outputs and can
-remove assembly/binning directories; use only for inspected rows.
+Step2 only reuses mixtures with a matching exact-count/path/size audit. Step3
+requires the mix audit and fastp input count, writes `STEP3_SUCCESS` after
+mapping/summary completion, and tags QC/assembly/mapping with the Step2 mix
+generation ID. Step4/5 require the same generation before reusing summaries. Step3B
+uses `VAMB_SUCCESS`. Keep target-only reads (`STEP2_KEEP_TARGET_READS=1`) until
+Step5. Nothing automatically deletes reads. `--force` replaces selected outputs
+and can remove assembly/binning directories; use only for inspected rows.
+
+Outputs created before these 0.3.1 read audits are legacy results. To rebuild a
+row, first run updated Step1 once (existing backgrounds are counted, not
+regenerated), then run Step2 `--force`, Step3 `--force`, and Step4/5 `--force`.
+Do not combine a corrected mixture with an older QC, assembly or mapping result.
 
 ```bash
 source "$RRMG_CONFIG"

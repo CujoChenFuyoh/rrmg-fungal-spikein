@@ -27,9 +27,16 @@ else
   echo '[ERROR] RandomReadsMG missing: put randomreadsmg.sh on PATH or set RANDOMREADSMG_SH.' >&2
   errors=$((errors + 1))
 fi
+if [[ -s "${RANDOMREADS_SH:-}" ]]; then
+  echo "[OK] RandomReads: $RANDOMREADS_SH"
+else
+  echo '[ERROR] RandomReads missing: put randomreads.sh on PATH or set RANDOMREADS_SH.' >&2
+  errors=$((errors + 1))
+fi
 [[ -z "${JAVA_BIN:-}" ]] || echo "[INFO] Java real path: $(readlink -f "$JAVA_BIN")"
 for file in rrmg_submit.sh rrmg_run_local.sh rrmg_run_one.sh rrmg_environment.sh \
   rrmg_step1_make_background_reads.sh rrmg_step2_make_target_and_merge.sh \
+  rrmg_mix_paired_fastq.py \
   rrmg_step3_downstream_analysis.sh rrmg_step4_5_supplementary_downstream.sh \
   rrmg_step4_reads_to_gene_depth.sh rrmg_step5_afum_target_reads_genome_cov.sh; do
   if [[ ! -s "$PIPELINE_DIR/$file" ]]; then
