@@ -5,6 +5,7 @@ environment.yml
 .gitattributes
 .gitignore
 docs/INSTALL.zh-CN.md
+docs/BBMAP.zh-CN.md
 rrmg_config.example.sh
 rrmg_run_local.sh
 rrmg_run_one.sh

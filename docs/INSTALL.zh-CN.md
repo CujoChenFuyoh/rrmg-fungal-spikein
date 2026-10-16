@@ -48,6 +48,12 @@ Git URL 只能安装已经推送的代码；本地改动使用 `pip install .`�
 Step3 也直接调用当前环境中的 fastp、SPAdes 和 minimap2，不再反复 `conda run`。
 配置里的 Java/BBMap 路径默认留空；发行版不固定任何电脑的路径。
 
+已有环境的名字不代表 BBMap 一定装在环境内。`environment.yml` 列出了 `bbmap`，
+但 `pip install` 不安装这些外部软件。先运行 `conda list -n fungamr_meta bbmap`，
+再核对下面两个 launcher 的真实位置。完整的同环境安装、官方归档下载、版本固定、
+配置与 PBS 检查代码见 [BBMap 下载与安装说明](BBMAP.zh-CN.md)。独立安装也可继续
+使用该环境的 Java，不需要另建 BBMap 环境。
+
 ```bash
 command -v datasets
 datasets version
@@ -66,6 +72,9 @@ BBMAP_DIR="/absolute/path/bbmap"
 RANDOMREADSMG_SH="/absolute/path/bbmap/randomreadsmg.sh"
 RANDOMREADS_SH="/absolute/path/bbmap/randomreads.sh"
 ```
+
+上述显式路径优先于 Conda/PATH。切换为环境内 BBMap 时，先清空原配置中这三项，
+在新终端激活环境并重新核对路径；不要仅安装一份新软件而继续调用旧目录。
 
 Step1 用 RandomReadsMG 生成群落背景，Step2 用 RandomReads 为多 contig 目标生成精确的总 reads 对数。
 BBMap 目录需包含配套的 Java class 和辅助脚本；不能只复制单个 launcher。

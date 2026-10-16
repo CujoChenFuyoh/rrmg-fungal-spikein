@@ -23,6 +23,10 @@
 CODE="/mnt/e/github_repo/rrmg-fungal-spikein"
 export WD="$HOME/rrmg_local_test_01"
 BBMAP_DIR_LOCAL="/mnt/f/DB/bbmap"
+# 上面是本机独立 BBMap 目录，不是 fungamr_meta 中的软件安装路径。
+# 复制到服务器时不能照搬；按 docs/BBMAP.zh-CN.md 安装/下载并填写真实目录。
+# 若使用 Conda 内 BBMap，先激活环境再按下面的命令查找目录；不要在激活前解析 PATH。
+# BBMAP_DIR_LOCAL="$(dirname "$(readlink -f "$(command -v randomreadsmg.sh)")")"
 GENE_SOURCE="/mnt/e/genedata/spikeIn/ref/CYP51A_wt.fasta"
 # runbook、R 绘图脚本和辅助脚本均随仓库提供，统一通过上面的 CODE 调用。
 SITES_SOURCE="/mnt/f/DB/FungAMR_catalogue/CYP51A_FungAMR_sites.tsv"

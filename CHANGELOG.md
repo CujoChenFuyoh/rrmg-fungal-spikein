@@ -2,6 +2,10 @@
 
 ## 0.3.1 — 2026-10-15
 
+- Document Conda-managed versus external BBMap, both required launchers,
+  fixed-version upstream archive downloads, override precedence and PBS checks.
+  Include the installation guide in pip/export assets; no environment is
+  installed or changed automatically.
 - Default Step3 to `STEP3_ONLY_ASSEMBLER=1` (metaSPAdes `--only-assembler`)
   while keeping fastp QC. Set `0` to enable native BayesHammer. Record assembly
   mode and refuse reuse of mismatched/unrecorded modes without an explicit

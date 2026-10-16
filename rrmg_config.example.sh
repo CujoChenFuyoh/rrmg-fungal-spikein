@@ -10,14 +10,17 @@ PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Working directory containing input/, ref/, temp/, result/, and logs/.
 WD="/absolute/path/to/SpikeIN"
 
-# Activate fungamr_meta BEFORE running this workflow. All tools, including
-# datasets and Java, use that environment's PATH; no second environment needed.
+# Activate fungamr_meta BEFORE running this workflow. Tools default to its PATH;
+# explicit external tool overrides are supported. No second environment needed.
 # CONDA_SH / RRMG_CONDA_ENV are optional conveniences for PBS examples only.
 CONDA_SH=""
 RRMG_CONDA_ENV="fungamr_meta"
 
 # Optional tool overrides. Normally leave empty (auto-resolve from active PATH).
 # A separately installed BBMap can be selected without changing environments.
+# Check both launchers, not just the environment name; see docs/BBMAP.zh-CN.md.
+# Explicit launcher overrides win over BBMAP_DIR/PATH; clear old overrides
+# before switching back to a Conda-managed BBMap installation.
 BBMAP_DIR="${BBMAP_DIR:-}"
 RANDOMREADSMG_SH="${RANDOMREADSMG_SH:-}"
 RANDOMREADS_SH="${RANDOMREADS_SH:-}"

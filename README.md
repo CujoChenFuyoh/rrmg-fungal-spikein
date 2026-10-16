@@ -136,8 +136,9 @@ SpikeIN/
 ## 1. Install and activate
 
 Linux/Ubuntu (including WSL), Bash and Python >=3.10 are required for analysis.
-Use the existing integrated environment. `datasets`, Java and analysis tools
-are all used from that environment; no separate ncbi_datasets environment is needed.
+Activate the existing integrated environment for `datasets`, Java and analysis
+tools on PATH; no separate ncbi_datasets environment is needed. An explicitly
+configured external BBMap installation is also supported (see below).
 
 ```bash
 conda activate fungamr_meta
@@ -162,6 +163,28 @@ a Git URL. This package is not automatically published to PyPI.
 `pip` installs code, not bioinformatics binaries or experimental data.
 If creating a new environment, use `conda env create -f environment.yml` first.
 Save `conda list --explicit` after validation for exact Linux environment reuse.
+
+### Check BBMap separately
+
+An existing environment's name does not prove it contains BBMap. The workflow
+needs both `randomreadsmg.sh` and `randomreads.sh`; Java can come from Conda
+while BBMap itself is installed in an external directory.
+
+```bash
+conda activate fungamr_meta
+conda list -n fungamr_meta bbmap
+command -v randomreadsmg.sh || true
+command -v randomreads.sh || true
+```
+
+`environment.yml` includes `bbmap` for new environments, but `pip install` does
+not install it. [BBMap installation and download guide](docs/BBMAP.zh-CN.md)
+provides both installation into the existing Conda environment and a pinned
+official archive download, complete-directory checks, configuration, version
+records and PBS verification. No separate BBMap environment is required.
+Existing `BBMAP_DIR` / `RANDOMREADSMG_SH` / `RANDOMREADS_SH` overrides must be
+reviewed before switching installations; they take priority over automatic PATH
+lookup. Do not silently upgrade or switch the tool used for ongoing replicates.
 
 ## 2. Configure a new local project
 
