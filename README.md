@@ -206,7 +206,7 @@ resolve from the active PATH. If BBMap is installed separately, set
 `BBMAP_DIR=/absolute/path/bbmap`, or set both `RANDOMREADSMG_SH` and
 `RANDOMREADS_SH` in the private config. No environment change is needed.
 Some PBS systems need explicit Java selection; see the commented block in both
-[PBS examples](examples/README.md). Release configs contain no machine's Java path.
+[PBS examples](pbs_example/README.md). Release configs contain no machine's Java path.
 
 The default up-to-4 threads / 4g simulation heap / 16 GB SPAdes memory are pilot
 settings, not a guarantee for a large metagenome. Adjust per-row settings to
@@ -365,15 +365,17 @@ cluster run analysis on allocated compute nodes, not the login node.
 
 ## 6. Ordinary PBS or PBS array
 
-Copy and adapt [examples/pbs.pbs](examples/pbs.pbs) or
-[examples/pbs_array.pbs](examples/pbs_array.pbs); these are not site-ready jobs.
-They activate `fungamr_meta`, optionally select Java and call the same runner.
+Copy and adapt [pbs_example/pbs.pbs](pbs_example/pbs.pbs) or
+[pbs_example/pbs_array.pbs](pbs_example/pbs_array.pbs). Both load the single
+`$WD/rrmg_config.sh` before initializing Conda; edit its absolute path and the
+site-specific resource/queue headers. See [PBS guide](pbs_example/README.md).
+They activate the configured Conda environment, optionally select Java and call the same runner.
 
 ```bash
 # Ordinary job: its body runs step2 1-100 sequentially.
-qsub -v RRMG_STAGE=step2,RRMG_ROWS=1-100 examples/pbs.pbs
+qsub -v RRMG_STAGE=step2,RRMG_ROWS=1-100 pbs_example/pbs.pbs
 # Array-capable PBS Pro: each array task runs ONE original row.
-qsub -J 1-100 -v RRMG_STAGE=step2 examples/pbs_array.pbs
+qsub -J 1-100 -v RRMG_STAGE=step2 pbs_example/pbs_array.pbs
 ```
 
 In an array the command is `rrmg_submit.sh step2 "$PBS_ARRAY_INDEX"`,

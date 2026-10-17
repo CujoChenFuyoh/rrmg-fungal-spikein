@@ -1,0 +1,35 @@
+#!/bin/bash
+# EXAMPLE: ordinary PBS/Torque; edit queue/resources and the config path.
+# q2s01/24 slots illustrates a queue-selected job with no fixed mem request.
+#PBS -N rrmg_example
+#PBS -q q2s01
+#PBS -l nodes=1:ppn=24
+#PBS -l walltime=168:00:00
+#PBS -j oe
+#PBS -S /bin/bash
+
+set -eo pipefail
+unset WD PIPELINE_DIR CONDA_SH RRMG_CONDA_ENV BBMAP_DIR RANDOMREADSMG_SH RANDOMREADS_SH
+unset PYTHONHOME PYTHONPATH JAVA_HOME JAVA_BIN CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL BASH_ENV ENV
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+export RRMG_CONFIG="/path/to/SpikeIN/rrmg_config.sh"
+test -s "$RRMG_CONFIG" || { echo "[ERROR] Missing config: $RRMG_CONFIG" >&2; exit 1; }
+source "$RRMG_CONFIG"
+: "${WD:?Set WD in config}" "${PIPELINE_DIR:?Set PIPELINE_DIR in config}"
+: "${CONDA_SH:?Set CONDA_SH in config}" "${RRMG_CONDA_ENV:?Set RRMG_CONDA_ENV in config}"
+source "$CONDA_SH"
+conda activate "$RRMG_CONDA_ENV"
+cd "$WD"
+
+# Optional after activation on PBS systems requiring explicit Java selection:
+# export JAVA_BIN="$(readlink -f "$CONDA_PREFIX/bin/java")"
+# export JAVA_HOME="$(dirname "$(dirname "$JAVA_BIN")")"
+# export PATH="$JAVA_HOME/bin:$PATH"
+source "$PIPELINE_DIR/rrmg_environment.sh"
+set -u
+
+# ROWS is an original plan ID or START-END, not physical TSV line numbers.
+# One job handles the chosen rows sequentially; request enough walltime.
+RUN_ARGS=(-t "${RRMG_THREADS:-1}" --jobs 1)
+[[ -n "${RRMG_MEMORY_GB:-}" ]] && RUN_ARGS+=(-m "$RRMG_MEMORY_GB")
+exec bash "$PIPELINE_DIR/rrmg_submit.sh" "${RRMG_STAGE:-step2}" "${RRMG_ROWS:-1-100}" "${RUN_ARGS[@]}"

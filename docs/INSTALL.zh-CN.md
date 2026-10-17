@@ -79,7 +79,7 @@ RANDOMREADS_SH="/absolute/path/bbmap/randomreads.sh"
 Step1 用 RandomReadsMG 生成群落背景，Step2 用 RandomReads 为多 contig 目标生成精确的总 reads 对数。
 BBMap 目录需包含配套的 Java class 和辅助脚本；不能只复制单个 launcher。
 部分 PBS 系统需要在作业脚本中显式指定 Java。这个例外写在
-[普通 PBS](../examples/pbs.pbs) 和 [PBS array](../examples/pbs_array.pbs) 的注释示例里，
+[普通 PBS](../pbs_example/pbs.pbs) 和 [PBS array](../pbs_example/pbs_array.pbs) 的注释示例里，
 放在 `conda activate` **之后**，按真实环境解析 `bin/java` 的符号链接；通常无需启用。
 没有把任何机构特定路径写进发行版。
 
@@ -206,7 +206,8 @@ ROW="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-}}"
 ```
 
 **不能写成 `1-$ROW`**，否则每个 array 子任务都会重复处理前面样品。
-完整头部、环境初始化、可选 Java 设置和提交命令见 [examples/README.md](../examples/README.md)。
+完整头部、读取唯一config启动环境、可选Java设置和提交命令见
+[pbs_example/README.md](../pbs_example/README.md)。
 PBS 的 queue/account/resource 语法由用户按服务器调整，核心流程没有固定 PBS 要求。
 旧根目录 `_array.pbs` 只保留为兼容示例；新本地入口不再依赖它们。
 

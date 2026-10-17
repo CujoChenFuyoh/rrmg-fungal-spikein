@@ -6,6 +6,7 @@ include rrmg_mix_paired_fastq.py
 include runbook.sh RUNBOOK_FIGURES_README.txt rrmg_windows_r.sh
 include rrmg_plot_preview.R rrmg_plot_alignment.R rrmg_plot_common.R rrmg_prepare_alignment_inputs.py
 recursive-include examples *.sh *.pbs *.tsv *.md
+recursive-include pbs_example *.pbs *.md
 include rrmg_prepare_manifest.py rrmg_download_genomes.sh rrmg_test_randomreadsmg_genomes.sh
 include rrmg_make_plan.py rrmg_make_background_plan.py
 include rrmg_step1_make_background_reads.sh rrmg_step1_background_array.pbs

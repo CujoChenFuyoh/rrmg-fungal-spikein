@@ -1,0 +1,36 @@
+#!/bin/bash
+# EXAMPLE: PBS Pro array; adapt resource/queue syntax for your server.
+# PBS Pro: qsub -J 1-100 pbs_example/pbs_array.pbs
+# Torque: qsub -t 1-100 pbs_example/pbs_array.pbs, only where arrays are enabled.
+#PBS -N rrmg_array_example
+#PBS -l select=1:ncpus=4
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -S /bin/bash
+
+set -eo pipefail
+unset WD PIPELINE_DIR CONDA_SH RRMG_CONDA_ENV BBMAP_DIR RANDOMREADSMG_SH RANDOMREADS_SH
+unset PYTHONHOME PYTHONPATH JAVA_HOME JAVA_BIN CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL BASH_ENV ENV
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+export RRMG_CONFIG="/path/to/SpikeIN/rrmg_config.sh"
+test -s "$RRMG_CONFIG" || { echo "[ERROR] Missing config: $RRMG_CONFIG" >&2; exit 1; }
+source "$RRMG_CONFIG"
+: "${WD:?Set WD in config}" "${PIPELINE_DIR:?Set PIPELINE_DIR in config}"
+: "${CONDA_SH:?Set CONDA_SH in config}" "${RRMG_CONDA_ENV:?Set RRMG_CONDA_ENV in config}"
+source "$CONDA_SH"
+conda activate "$RRMG_CONDA_ENV"
+cd "$WD"
+
+# Optional after activation on PBS systems requiring explicit Java selection:
+# export JAVA_BIN="$(readlink -f "$CONDA_PREFIX/bin/java")"
+# export JAVA_HOME="$(dirname "$(dirname "$JAVA_BIN")")"
+# export PATH="$JAVA_HOME/bin:$PATH"
+source "$PIPELINE_DIR/rrmg_environment.sh"
+set -u
+
+ROW="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-}}"
+[[ "$ROW" =~ ^[1-9][0-9]*$ ]] || { echo '[ERROR] Array index is unset/invalid' >&2; exit 1; }
+# One array task = one original plan ID. Never pass a range such as "1-$ROW".
+RUN_ARGS=(-t "${RRMG_THREADS:-1}" --jobs 1)
+[[ -n "${RRMG_MEMORY_GB:-}" ]] && RUN_ARGS+=(-m "$RRMG_MEMORY_GB")
+exec bash "$PIPELINE_DIR/rrmg_submit.sh" "${RRMG_STAGE:-step2}" "$ROW" "${RUN_ARGS[@]}"
