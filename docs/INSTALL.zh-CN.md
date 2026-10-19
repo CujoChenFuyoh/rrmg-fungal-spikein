@@ -1,14 +1,15 @@
 # 安装、从零准备输入与跨服务器运行
 
-版本 0.3.1。样品目录和实验 plan 保持原结构；延续 0.3.0 的独立调度入口，新增精确 reads 计数/混合审计、随包 runbook、R 绘图、固定输出目录和输入路径检查。
+本页详细说明环境、manifest、genome下载、plan和跨服务器运行。
+最少命令见[快速上手](QUICKSTART.zh-CN.md)，阶段定义见[WORKFLOW](WORKFLOW.md)。
 
 本地逐段测试及出图见 [runbook.sh](../runbook.sh) 第 0–15 段；所有脚本统一通过 `CODE` 调用。
 `.gitattributes` 将文本文件固定为 LF，不需要更改 Windows Git 的全局 `core.autocrlf`。
 
-**重要变化：`rrmg_submit.sh` 不再递交 PBS，而是直接运行任务。**
+**运行入口：`rrmg run` 在当前环境直接运行任务。**
 激活环境后运行 `./rrmg_submit.sh step2 1-100`，默认顺序处理原 plan 中的 run_index 1–100。
 不要在 HPC 登录节点直接执行重分析；把同一句命令放进自己的 PBS 作业。
-本地入口不再执行 `.pbs` 文件，也不再生成假的 PBS 环境变量。
+调度外壳和分析命令分开；普通PBS和array采用同一分析入口。
 
 ## 1. 安装和配置
 
@@ -36,7 +37,7 @@ python -m pip install 'git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.
 rrmg init --workdir /path/to/SpikeIN
 ```
 
-不指定 `--pipeline-dir` 时，核心代码冻结到 `.rrmg/core-0.3.1/`，防止以后的 pip 升级悄悄替换当前实验代码。
+不指定 `--pipeline-dir` 时，核心代码冻结到 `.rrmg/core-0.3.2/`，防止以后的 pip 升级悄悄替换当前实验代码。
 Git URL 只能安装已经推送的代码；本地改动使用 `pip install .`。
 可用 `rrmg export /path/to/new_core` 导出带校验清单的核心代码和 examples；不会覆盖已有目录。
 离线安装可先 `python -m pip wheel --no-deps . -w dist`，复制 wheel 后用 `pip install --no-index --no-deps 文件.whl`。
@@ -81,7 +82,6 @@ BBMap 目录需包含配套的 Java class 和辅助脚本；不能只复制单�
 部分 PBS 系统需要在作业脚本中显式指定 Java。这个例外写在
 [普通 PBS](../pbs_example/pbs.pbs) 和 [PBS array](../pbs_example/pbs_array.pbs) 的注释示例里，
 放在 `conda activate` **之后**，按真实环境解析 `bin/java` 的符号链接；通常无需启用。
-没有把任何机构特定路径写进发行版。
 
 默认配置为小规模试跑：一般每任务 4 线程，Step2 为固定 seed 可重复性默认 1 线程，模拟 Java heap 4g、SPAdes 16 GB。
 真实宏基因组可能需要更多资源，按作业申请调整。`--jobs 4` 会叠加四份资源，不是共用四线程。
@@ -209,33 +209,30 @@ ROW="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-}}"
 完整头部、读取唯一config启动环境、可选Java设置和提交命令见
 [pbs_example/README.md](../pbs_example/README.md)。
 PBS 的 queue/account/resource 语法由用户按服务器调整，核心流程没有固定 PBS 要求。
-旧根目录 `_array.pbs` 只保留为兼容示例；新本地入口不再依赖它们。
+根目录旧 `_array.pbs` 已移除；普通PBS和array都使用 `pbs_example/` 中的通用模板。
 
 ## 6. 继续旧实验、汇总和备份
 
 ```bash
 conda activate fungamr_meta
 export RRMG_CONFIG=/path/to/existing/rrmg_config.sh
-rrmg run step2 409-480 -t 1 -m 4 --dry-run
-rrmg run step2 409-480 -t 1 -m 4 --jobs 1
-rrmg run step2 225-230 -t 1 -m 4 --jobs 1
+rrmg run step2 11-20 -t 1 -m 4 --dry-run
+rrmg run step2 11-20 -t 1 -m 4 --jobs 1
 # 相应完成后，按同样范围运行 step3，再 step45。
 ```
 
 原输入、背景 FASTQ/index、plan 中的绝对路径仍需有效，clone/pip 不会迁移这些数据。
 旧配置的 `/EDIT_ME/` 或失效 Java 路径需清空或修正；在调用前主动激活环境。
 保留 `STEP2_KEEP_TARGET_READS=1` 供 Step5 使用。不要同时操作同一个样品，或重建仍被消费的背景。
-当前 Step2 只复用带精确计数/路径/大小审计的混合 reads；每次重建还会产生新的 mix generation ID，
-Step3–5 会同时核对 fastp/target 计数及上下游 generation 标记，不依赖文件 mtime 判断来源。
-旧结果没有 `read_mix_audit.tsv` 时会被拒绝，而不是静默复用。修复旧 row 时，先用新版 Step1
-运行一次以给已有背景计数（不会重生成），再依次用 `--force` 重跑 Step2、Step3 和 Step4/5；
-不能把新混合 reads 与旧 QC、assembly 或 mapping 拼接使用。
+当前流程通过计数审计和mix generation核对reads来源。旧结果迁移、参考变化和重建顺序
+见[故障与续跑](TROUBLESHOOTING.zh-CN.md)，不要把新reads与旧QC/assembly混用。
 `--force` 可能删除指定样品已有 assembly/binning，只对已核对的 row 使用。
 每次执行都有 `logs/local/.../summary.tsv` 和 `row_N.log`，部分失败时继续尝试其余选定样品，最终返回非零。
 Step3 是 fastp QC，不是 FastQC；Step5 的 coverage bins 不是 VAMB genome bins。
 Step3 的空 VCF/`VarN=0` 仍是占位，不能当作完成 fungAMR 突变检测。
 
-绘图输入收集命令见 [README 的 Collect 部分](../README.md#7-resume-collect-and-preserve-results)。
+收集命令见[快速上手](QUICKSTART.zh-CN.md#4-收集和绘图)，绘图输入见
+[绘图说明](../RUNBOOK_FIGURES_README.txt)。PAF默认保留，供read/contig alignment-block图使用。
 无需全部重复结束才能收集，但必须对照 plan 核对缺失 ID，不能把缺失当零。
 只做 reads/contigs 时不用等 VAMB；按图需要额外备份 per-base depth 和 genome coverage window 表。
 不要在任务运行期间升级代码或更改配置。

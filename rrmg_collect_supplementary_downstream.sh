@@ -5,7 +5,7 @@ set -euo pipefail
 # Positional arguments:
 #   1) project working directory
 #   2) permutation run root, relative to the project unless absolute
-# Run only after all corresponding PBS array jobs have completed.
+# Collect existing summaries; audit missing IDs against the plan for partial cohorts.
 
 WD="${1:-$PWD}"
 ROOT="${2:-temp/rrmg_permutation}"

@@ -16,8 +16,7 @@ Purpose:
 Interpretation:
   This split Step 3 measures target-gene detection, alignment identity, and
   breadth. It currently creates an empty VCF placeholder and reports VarN=0;
-  it does NOT call or annotate CYP51A/fungAMR mutations. The legacy all-in-one
-  rrmg_virtual_metagenome_permutation.sh contains a paftools.js calling step.
+  it does NOT call or annotate CYP51A/fungAMR mutations.
 
 Options:
   -gene FILE             Target gene FASTA for contig mapping
@@ -146,7 +145,8 @@ contigs_to_target_summary() {
   if [[ -z "$best_line" ]]; then echo -e "${sid}\t${ttype}\t${target}\t${contigs}\tN\t0\t0\t0\t0\t${vcf}\t0" >> "$out"; return 0; fi
   best_alnlen=$(echo "$best_line" | awk '{print $11}')
   best_ident=$(echo "$best_line" | awk '{if($11>0)printf "%.6f",100*$10/$11;else print "0"}')
-  target_len=$(awk 'BEGIN{len=0}/^>/{next}{len+=length($0)}END{print len}' "$target")
+  # FASTA formatting is not sequence: ignore whitespace, including CRLF's CR.
+  target_len=$(awk 'BEGIN{len=0}/^>/{next}{gsub(/[[:space:]]/, "");len+=length($0)}END{print len}' "$target")
   covbp=$(awk '$12>=20{s=$8;e=$9;if(s>e){t=s;s=e;e=t};print s"\t"e}' "$paf" | merge_intervals_cov_bp)
   breadth=$(awk -v c="$covbp" -v L="$target_len" 'BEGIN{if(L>0)printf "%.6f",100*c/L;else print "0"}')
   : > "$vcf" || true

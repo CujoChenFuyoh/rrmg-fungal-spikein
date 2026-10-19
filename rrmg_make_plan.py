@@ -4,20 +4,18 @@ Pipeline stage 1A: expand the experimental design into a permutation plan.
 
 Input: the tested six-column community manifest plus target abundances, one
 depth definition (coverage, total bases, or paired-read count), and seeds.
-Output: one TSV row per abundance x depth x seed combination. Downstream PBS
-array jobs use ``run_index`` as their 1-based row selector.
+Output: one TSV row per abundance x depth x seed combination. The runner
+selects rows by their stable ``run_index`` values.
 
 Create a flat RandomReadsMG permutation plan.
 
 One row = one randomreads virtual-metagenome run.
 
-This version keeps the execution columns used by run_rrmg_plan_array.sh:
+Execution columns:
   total_cov / total_bases / total_pairs
 and adds design-check columns:
   community_size_bp, computed_total_bases, computed_total_pairs,
   computed_total_cov, target_genome_bp, target_expected_cov, etc.
-
-Python 3.6 compatible.
 
 ``community_size_bp`` is a genome-equivalent size, not the sum of every FASTA.
 Without an explicit reference/size it is the abundance-weighted mean genome
@@ -56,6 +54,8 @@ def parse_seeds(s):
             seeds.extend(list(range(a_i, b_i + step, step)))
         else:
             seeds.append(int(part))
+    if len(seeds) != len(set(seeds)):
+        raise SystemExit('[ERROR] Duplicate seeds would create repeated run_id/output directories')
     return seeds
 
 
@@ -165,7 +165,7 @@ def resolve_target_fasta(rows, target_name='', target_taxid='', target_genome_id
 
 
 def final_abundance_rows(rows, target_abund, target_name='', target_taxid='', target_genome_id='', target_fasta=''):
-    """Mimic rrmg_virtual_metagenome_permutation.sh insertion/rescaling.
+    """Insert the target fraction and rescale the remaining background weights.
 
     Target abundance can be 0. In that case target is not included in the final
     community for simulation, but target coverage columns can still be computed
@@ -231,7 +231,7 @@ def format_float(x, digits=10):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='Create rrmg_permutation_plan.tsv for PBS-array randomreads simulations with precomputed depth/coverage columns.')
+    ap = argparse.ArgumentParser(description='Create a permutation plan with stable run IDs and expected depth/coverage columns.')
     ap.add_argument('--manifest', required=True, help='Flat community manifest: genome_ID,name,taxid,rel_abund,fasta,role')
     ap.add_argument('--out', required=True, help='Output plan TSV')
     ap.add_argument('--sample-prefix', required=True, help='Prefix for run/sample names')
@@ -250,9 +250,11 @@ def main():
     ap.add_argument('--community-size-bp', default='', help='Optional numeric community genome-equivalent size in bp; ignored if --reference-fasta is set')
     ap.add_argument('--count-acgt-only', action='store_true', help='Count only A/C/G/T bases in FASTA length calculations; default counts all non-header characters including N')
     ap.add_argument('--abundance-mode', choices=['read_fraction', 'copy_number'], default='read_fraction',
-                    help='Coverage calculation mode; should match rrmg_virtual_metagenome_permutation.sh, default read_fraction')
+                    help='Supported execution mode: read_fraction. copy_number is reserved and rejected until implemented consistently.')
     ap.add_argument('--species-name-for-kraken', default='', help='Species name to extract from Kraken2 report; default target-name')
     args = ap.parse_args()
+    if args.abundance_mode != 'read_fraction':
+        ap.error('copy_number is not implemented consistently across planning and execution; use read_fraction')
 
     depth_modes = sum(bool(x) for x in [args.coverages, args.total_bases, args.total_pairs])
     if depth_modes != 1:
@@ -273,6 +275,8 @@ def main():
 
     if not abundances or not seeds or not depths:
         raise SystemExit('[ERROR] Empty abundances/depths/seeds')
+    if len(abundances) != len(set(abundances)) or len(depths) != len(set(depths)):
+        raise SystemExit('[ERROR] Duplicate design conditions would create repeated run_id/output directories')
 
     fixed_reference_bp = None
     reference_fasta = args.reference_fasta
@@ -295,7 +299,7 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = [
-        # execution columns used by run_rrmg_plan_array.sh
+        # Execution columns shared by all launchers.
         'run_index', 'run_id', 'sample', 'manifest',
         'target_name', 'target_taxid', 'target_genome_id', 'target_fasta', 'target_abundance',
         'total_cov', 'total_bases', 'total_pairs', 'seed', 'species_name_for_kraken',
@@ -326,7 +330,7 @@ def main():
             else:
                 community_size_bp = float(weighted_mean_len(final_rows, acgt_only=args.count_acgt_only))
 
-            # Execution depth columns: keep exactly one populated, so old runner/simulator remain safe.
+            # Exactly one depth definition is populated for the simulator.
             total_cov = total_bases = total_pairs = ''
             depth_tag = ''
             if depth_type == 'total_cov':

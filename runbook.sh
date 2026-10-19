@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# RRMG 0.3.1 本地 Ubuntu/WSL 逐段运行手册
+# RRMG 0.3.2 本地 Ubuntu/WSL 逐段运行手册
 # ------------------------------------------------------------
 # 用法：在编辑器打开本文件，按编号依次复制到同一个 Ubuntu Bash 终端。
 # 带反斜杠的多行命令、if/fi、Python heredoc 必须作为一个完整块执行。
 # 不在 Windows PowerShell 里执行，不需要 qsub，不调用 PBS 文件。
 # 建议首次逐段检查，不直接 bash runbook.sh 一次跑到底。
-# 本文件是本机手册，开头路径不是发行版默认设置。
+# 在仓库目录开始；先设置下方输入路径。安装细节见 docs/INSTALL.zh-CN.md。
 #
 # 测试设计：2 个演示背景物种 + Af293；1 个丰度/深度条件；Seed 1、2。
 # 设计：每重复 1,000,000 对 reads，目标 reads 比例 0.01，read length 150。
@@ -20,28 +20,31 @@
 
 
 # ===== 0. 路径和环境：先核对下面的路径 =====
-CODE="/mnt/e/github_repo/rrmg-fungal-spikein"
-export WD="$HOME/rrmg_local_test_01"
-BBMAP_DIR_LOCAL="/mnt/f/DB/bbmap"
-# 上面是本机独立 BBMap 目录，不是 fungamr_meta 中的软件安装路径。
-# 复制到服务器时不能照搬；按 docs/BBMAP.zh-CN.md 安装/下载并填写真实目录。
-# 若使用 Conda 内 BBMap，先激活环境再按下面的命令查找目录；不要在激活前解析 PATH。
-# BBMAP_DIR_LOCAL="$(dirname "$(readlink -f "$(command -v randomreadsmg.sh)")")"
-GENE_SOURCE="/mnt/e/genedata/spikeIn/ref/CYP51A_wt.fasta"
+CODE="${CODE:-$PWD}"
+export WD="${WD:-$HOME/rrmg_local_test_01}"
+BBMAP_DIR_LOCAL="${BBMAP_DIR_LOCAL:-}"
+# 环境内BBMap在激活后自动解析；外部安装时先 export BBMAP_DIR_LOCAL=/absolute/path/bbmap。
+GENE_SOURCE="${GENE_SOURCE:-}"
+# 先 export GENE_SOURCE=/absolute/path/CYP51A_wt.fasta；必须是已核验的基因参考。
 # runbook、R 绘图脚本和辅助脚本均随仓库提供，统一通过上面的 CODE 调用。
-SITES_SOURCE="/mnt/f/DB/FungAMR_catalogue/CYP51A_FungAMR_sites.tsv"
-CATALOGUE_SOURCE="/mnt/f/DB/FungAMR_catalogue/Afum_fungamr.catalogue.tsv"
-export WIN_RSCRIPT="/mnt/c/Program Files/R/R-4.6.0/bin/Rscript.exe"
-export WIN_R_LIB="C:/Users/q6321/AppData/Local/R/win-library/4.6"
+SITES_SOURCE="${SITES_SOURCE:-}"
+CATALOGUE_SOURCE="${CATALOGUE_SOURCE:-}"
+# 位点注释可选；需要时同时设置以上两个TSV。Windows R可设置WIN_RSCRIPT/WIN_R_LIB。
 export RRMG_CONFIG="$WD/rrmg_config.sh"
 
-source "$HOME/miniconda3/etc/profile.d/conda.sh"
+CONDA_SH="${CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}"
+source "$CONDA_SH"
 conda activate fungamr_meta
+if [[ -z "$BBMAP_DIR_LOCAL" ]] && command -v randomreadsmg.sh >/dev/null; then
+    BBMAP_DIR_LOCAL="$(dirname "$(readlink -f "$(command -v randomreadsmg.sh)")")"
+fi
 
 # 报错即停。不要把报错后的命令也粘贴进去。
 set -eo pipefail
 cd "$CODE"
-test "$(tr -d '\r\n' < VERSION)" = "0.3.1"
+test -s VERSION
+: "${GENE_SOURCE:?Set GENE_SOURCE to the verified target-gene FASTA}"
+: "${BBMAP_DIR_LOCAL:?Set BBMAP_DIR_LOCAL or install BBMap in the active environment}"
 test -s "$BBMAP_DIR_LOCAL/randomreadsmg.sh"
 test -s "$BBMAP_DIR_LOCAL/randomreads.sh"
 test -s "$GENE_SOURCE"
@@ -58,7 +61,7 @@ free -h
 
 
 # ===== 1. 安装本地最新代码，创建独立测试配置（只做一次） =====
-# 使用本地代码，因为本地 0.3.1 修改可能尚未推送到 GitHub。
+# 从当前检出的源码安装。
 python -m pip install .
 rrmg --version
 
@@ -158,7 +161,7 @@ cp -- "$CODE/VERSION" "$WD/result/workflow_VERSION.txt"
 git -C "$CODE" rev-parse HEAD > "$WD/result/workflow_commit.txt"
 git -C "$CODE" status --short > "$WD/result/workflow_status.txt"
 # 本地未提交修改不会由 commit SHA 代表，因此另存实际核心脚本快照。
-rrmg export "$WD/code_snapshot_0.3.1"
+rrmg export "$WD/code_snapshot_0.3.2"
 
 
 # ===== 5. 生成测试 plan 和背景设计（只做一次） =====
@@ -186,7 +189,6 @@ python3 "$CODE/rrmg_make_background_plan.py" \
 
 wc -l "$WD/input/rrmg/rrmg_permutation_plan.tsv" "$WD/temp/rrmg_background/background_plan.tsv"
 # 预期分别 3 行、2 行（都包含表头），即两个 permutation、一个背景条件。
-# 如背景规划脚本末尾仍打印旧 qsub 提示，忽略它；按下面的新入口运行。
 rrmg doctor --config "$RRMG_CONFIG"
 
 
@@ -201,7 +203,7 @@ rrmg doctor --config "$RRMG_CONFIG"
 # PBS 包装脚本申请的 ncpus 至少应覆盖 --jobs × 这里的 -t。
 # 数字 1 是 background_plan 的 bg_index，不是 permutation 的 run_index。
 bash "$CODE/rrmg_submit.sh" step1 1 -t 4 -m 4 --dry-run
-bash "$CODE/rrmg_submit.sh" step1 1 -t 4 -m 4 --jobs 1 --force
+bash "$CODE/rrmg_submit.sh" step1 1 -t 4 -m 4 --jobs 1
 find "$WD/temp/rrmg_background" -name '*.pair_count.tsv' -type f -size +0c -print \
     -exec column -t -s $'\t' {} \;
 # source_pairs 可大于设计背景数；Step2 会均匀下采样到精确 background_pairs。
@@ -218,7 +220,7 @@ find "$WD/temp/rrmg_background" -name '*.pair_count.tsv' -type f -size +0c -prin
 # 强制重做 Step2 会产生新的 read generation；同一批样品的 Step3–5 也必须重跑。
 # 这里 1-2 是 permutation plan 的 run_index，不是文本行号或物种 ID。
 bash "$CODE/rrmg_submit.sh" step2 1-2 -t 1 -m 4 --dry-run
-bash "$CODE/rrmg_submit.sh" step2 1-2 -t 1 -m 4 --jobs 1 --force
+bash "$CODE/rrmg_submit.sh" step2 1-2 -t 1 -m 4 --jobs 1
 find "$WD/temp/rrmg_permutation" -path '*/design/read_mix_audit.tsv' -type f -size +0c -print \
     -exec column -t -s $'\t' {} \;
 # 每个 audit 必须是 gzip_members_per_output=1，且 background+target=total。
@@ -232,7 +234,7 @@ find "$WD/temp/rrmg_permutation" -path '*/design/read_mix_audit.tsv' -type f -si
 #   STEP3_PHRED_OFFSET=33       # 本流程模拟 Illumina reads 的质量编码
 #   STEP3_ONLY_ASSEMBLER=1      # 默认：fastp 后以 --only-assembler 拼接，跳过 BayesHammer
 #                              # 改为 0 则恢复原生 reads 纠错；不要混用两种模式做同组比较
-#   STEP3_SKIP_QC=0             # 设 1 仅在已有可验证 QC reads 时跳过 fastp
+#   STEP3_SKIP_QC=0             # 设1使用raw reads跳过fastp；不是复用QC的开关
 #   STEP3_SKIP_ASSEMBLY=0       # 设 1 仅在已有可验证 assembly 时跳过拼接
 #   RUN_KRAKEN=0                # 设 1 时还必须设置 KRAKEN_DB
 # 省略 -t/-m 时才使用 STEP3_THREADS/STEP3_SPADES_MEM_GB 的配置值。
@@ -245,7 +247,7 @@ find "$WD/temp/rrmg_permutation" -path '*/design/read_mix_audit.tsv' -type f -si
 # 完成后 asm/RRMG_ASSEMBLY_MODE 和 STEP3_SUCCESS 记录本次模式。
 # 已有旧 assembly 若缺少模式记录会要求重建，不会将旧 contigs 静默当成新模式结果。
 # 下面 -t/-m/--jobs 是用户可修改的示例资源值，不是流程对服务器资源的限制。
-bash "$CODE/rrmg_submit.sh" step3 1-2 -t 12 -m 100 --jobs 2 --force
+bash "$CODE/rrmg_submit.sh" step3 1-2 -t 4 -m 16 --jobs 1
 find "$WD/temp/rrmg_permutation" -path '*/asm/contigs.fasta' -type f -size +0c -print
 # 应看到两个 contigs.fasta。无目标基因命中不等于 assembly 运行失败。
 # 重新拼接后继续第 11–15 段，重收集 contig 汇总并重建绘图输入；不能只重画旧汇总。
@@ -258,7 +260,8 @@ find "$WD/temp/rrmg_permutation" -path '*/asm/contigs.fasta' -type f -size +0c -
 # Step4 没有可靠的程序总内存参数，因此不接受 -m；PBS mem 在作业脚本中按服务器设置。
 # 提交范围和 --jobs 规则与 Step2 相同；PBS ncpus 至少为 jobs × -t。
 # Step4 依赖 Step3 的 QC reads；--force 只重建本步骤 mapping/depth 输出。
-bash "$CODE/rrmg_submit.sh" step4 1-2 -t 12 --jobs 2 --force
+bash "$CODE/rrmg_submit.sh" step4 1-2 -t 4 --jobs 1
+# 默认保留PAF用于read-block图；不使用 --no-paf。
 
 
 # ===== 10. Step5：target-only reads → Af293 genome coverage =====
@@ -270,7 +273,7 @@ bash "$CODE/rrmg_submit.sh" step4 1-2 -t 12 --jobs 2 --force
 # Step5 没有可靠的程序总内存参数，因此不接受 -m；PBS mem 在作业脚本中按服务器设置。
 # Step5 必须有 STEP2_KEEP_TARGET_READS=1 生成的 target-only 双端 reads。
 # 提交范围和 --jobs 规则与 Step2 相同；提高 jobs 时 CPU、内存和磁盘 I/O 同时增加。
-bash "$CODE/rrmg_submit.sh" step5 1-2 -t 12 --jobs 2 --force
+bash "$CODE/rrmg_submit.sh" step5 1-2 -t 4 --jobs 1
 # step45 1-2 可代替上面两步，但本手册拆开以便定位失败位置。
 # Step5 的 coverage windows 不是 genome binning 结果。
 
@@ -374,8 +377,7 @@ PY
 # 在 Ubuntu/WSL 中调用 Windows 的 Rscript.exe，使用 Windows 的 R 包库。
 # 不调用 /usr/bin/Rscript，也不让 Linux R 加载 Windows 编译的包。
 # 两边路径由包装脚本自动转换；检查依赖，不自动安装/修改 R 包。
-# 指标/分组参考原 Windows 版 RRMG_permutation_summary_plots.R 和
-# RRMG_Afum_target_reads_genome_coverage_plots.R；图形用 base R 重绘，不依赖其旧路径。
+# 总体图使用base R；原生Linux R用法见RUNBOOK_FIGURES_README.txt。
 bash "$CODE/rrmg_windows_r.sh" --check
 test -s "$CODE/rrmg_plot_preview.R"
 
@@ -415,9 +417,9 @@ cat "$FIG_OUT/warnings.txt"
 # explorer.exe "$(wslpath -w "$FIG_OUT")"
 #
 # 同一个 R 脚本也能在 Windows 使用，下面是 PowerShell 示例，不要在 Bash 粘贴：
-# $Rscript = 'C:/Program Files/R/R-4.6.0/bin/Rscript.exe'
-# $CODE = 'E:/github_repo/rrmg-fungal-spikein'
-# $WD = 'H:/genedata/SpikeIN'
+# $Rscript = 'C:/Program Files/R/R-<version>/bin/Rscript.exe'
+# $CODE = 'C:/path/to/rrmg-fungal-spikein'
+# $WD = 'D:/path/to/SpikeIN'
 # $FIG_OUT = "$WD/figure_output/local_preview"
 # & $Rscript "$CODE/rrmg_plot_preview.R" $WD $FIG_OUT
 # Invoke-Item "$FIG_OUT/design_hit_rates.png"
@@ -436,17 +438,20 @@ cat "$FIG_OUT/warnings.txt"
 # 当前 gene FASTA 的真实参考碱基核验；不使用 aa_pos*3，不推断或修复错误坐标。
 # catalogue status 非 ok、参考密码子不符或坐标不符的条目进入排除审计表。
 # 注释仅为参考位点的覆盖展示，不代表相应突变已检出；promoter/TR 不在 gene 区间时不补画。
-# 恢复变量，避免单独复制本段时空字符串被 Python 当作当前目录 '.'。
-SITES_SOURCE="${SITES_SOURCE:-/mnt/f/DB/FungAMR_catalogue/CYP51A_FungAMR_sites.tsv}"
-CATALOGUE_SOURCE="${CATALOGUE_SOURCE:-/mnt/f/DB/FungAMR_catalogue/Afum_fungamr.catalogue.tsv}"
+# 位点注释可选；两个参数同时提供或同时省略。
 : "${CODE:?先设置 CODE 为仓库目录}"
 : "${WD:?先设置 WD 为已有分析工作目录}"
-for INPUT_FILE in "$WD/ref/CYP51A_wt.fasta" "$SITES_SOURCE" "$CATALOGUE_SOURCE"; do
-    if [[ ! -f "$INPUT_FILE" || ! -s "$INPUT_FILE" ]]; then
-        printf '[ERROR] 输入必须是非空文件：%s\n' "$INPUT_FILE" >&2
-        exit 1
-    fi
-done
+test -s "$WD/ref/CYP51A_wt.fasta"
+SITE_ARGS=()
+if [[ -n "${SITES_SOURCE:-}" || -n "${CATALOGUE_SOURCE:-}" ]]; then
+    for INPUT_FILE in "${SITES_SOURCE:-}" "${CATALOGUE_SOURCE:-}"; do
+        if [[ ! -f "$INPUT_FILE" || ! -s "$INPUT_FILE" ]]; then
+            printf '[ERROR] 输入必须是非空文件：%s\n' "$INPUT_FILE" >&2
+            exit 1
+        fi
+    done
+    SITE_ARGS=(--sites "$SITES_SOURCE" --catalogue "$CATALOGUE_SOURCE")
+fi
 ALIGN_INPUT="$WD/figure_data/CYP51A_alignment"
 python3 "$CODE/rrmg_prepare_alignment_inputs.py" \
     --wd "$WD" \
@@ -454,22 +459,23 @@ python3 "$CODE/rrmg_prepare_alignment_inputs.py" \
     --out "$ALIGN_INPUT" \
     --rows 1-2 \
     --threads 4 \
-    --sites "$SITES_SOURCE" \
-    --catalogue "$CATALOGUE_SOURCE"
+    "${SITE_ARGS[@]}"
 
 # --rows 是 plan 中的 run_index；扩大队列时可用 1-100 或 409-480,225-230，或 all。
 # COMPLETE.json 只在所有所选样品完成后生成。无命中允许空 PAF，但 depth 必须逐碱基完整。
 # 只有看到本次 [DONE] 后才继续。失败不会替换上一轮成功结果，不要将旧 COMPLETE 当作本次成功。
 test -s "$ALIGN_INPUT/COMPLETE.json"
 find "$ALIGN_INPUT" -maxdepth 2 -type f \( -name '*.paf' -o -name '*.paf.gz' -o -name '*.depth.tsv' \) -print
-column -t -s $'\t' "$ALIGN_INPUT/site_annotation_audit.tsv"
+if [[ -s "$ALIGN_INPUT/site_annotation_audit.tsv" ]]; then
+    column -t -s $'\t' "$ALIGN_INPUT/site_annotation_audit.tsv"
+fi
 # 每个 row_XXXXX/：contig PAF、mixed-QC PAF.gz + depth、target-only PAF.gz + depth。
 # 总目录：gene FASTA、plot_manifest.with_target_only.tsv、校验后的位点表、原始表与审计记录。
 # BAM 只是此步骤的中间文件，验证 depth 后删除；原 BAM、FASTQ 和 contigs 均不删除。
 
 
 # ===== 15. Windows R 生成位点标注、contig alignment、read-block 图 =====
-# 使用旧脚本的 ggplot2/patchwork 图形结构与橙色/灰色 reads 配色，已移除旧 setwd。
+# ggplot2/patchwork图：混合reads橙色、target-only reads灰色。
 # 用当前的 Windows R 包库，不需要在 Ubuntu 安装这些 R 包。
 ALIGN_INPUT="$WD/figure_data/CYP51A_alignment"
 ALIGN_FIG_OUT="$WD/figure_output/alignment_sites"
@@ -491,7 +497,7 @@ find "$ALIGN_FIG_OUT" -maxdepth 2 -type f \( -name '*.png' -o -name '*.pdf' -o -
 #
 # source "$HOME/miniconda3/etc/profile.d/conda.sh"
 # conda activate fungamr_meta
-# CODE="/mnt/e/github_repo/rrmg-fungal-spikein"
+# CODE="/absolute/path/to/rrmg-fungal-spikein"
 # export RRMG_CONFIG="$HOME/rrmg_local_test_01/rrmg_config.sh"
 # source "$RRMG_CONFIG"
 # bash "$CODE/rrmg_submit.sh" step3 2 -t 4 -m 16 --jobs 1

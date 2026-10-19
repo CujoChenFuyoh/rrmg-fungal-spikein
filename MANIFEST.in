@@ -9,15 +9,15 @@ recursive-include examples *.sh *.pbs *.tsv *.md
 recursive-include pbs_example *.pbs *.md
 include rrmg_prepare_manifest.py rrmg_download_genomes.sh rrmg_test_randomreadsmg_genomes.sh
 include rrmg_make_plan.py rrmg_make_background_plan.py
-include rrmg_step1_make_background_reads.sh rrmg_step1_background_array.pbs
-include rrmg_step2_make_target_and_merge.sh rrmg_step2_target_merge_array.pbs
-include rrmg_step3_downstream_analysis.sh rrmg_step3_downstream_array.pbs
-include rrmg_step3b_vamb_binning.sh rrmg_step3b_vamb_array.pbs
-include rrmg_step4_5_supplementary_downstream.sh rrmg_step4_5_supplementary_downstream_array.pbs
+include rrmg_step1_make_background_reads.sh
+include rrmg_step2_make_target_and_merge.sh
+include rrmg_step3_downstream_analysis.sh
+include rrmg_step3b_vamb_binning.sh
+include rrmg_step4_5_supplementary_downstream.sh
 include rrmg_step4_reads_to_gene_depth.sh rrmg_step5_afum_target_reads_genome_cov.sh
 include rrmg_collect_map_results.py rrmg_collect_reads_to_gene_depth.py rrmg_collect_afum_genome_cov.py
 include rrmg_collect_vamb_results.py rrmg_collect_supplementary_downstream.sh
-include rrmg_evaluate_vamb_bins.py rrmg_add_target_only_cyp51a_to_figure_data.py
+include rrmg_evaluate_vamb_bins.py
 recursive-include docs *.md
 recursive-include .github *.yml *.yaml
 recursive-include tests *.py *.sh *.R

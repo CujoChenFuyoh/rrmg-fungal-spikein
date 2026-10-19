@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.2 — 2026-10-19
+
+- Consolidate user documentation into quick start, installation, workflow,
+  figure and troubleshooting references; remove personal path defaults and
+  unversioned manual validation claims from user instructions.
+- Keep PAF generation enabled for complete read/contig alignment figures.
+  Mapping reuse and unified reference/parameter fingerprints remain pending.
+- Use conservative single-row pilot resources without implicit force rebuilds.
+- Remove the five fixed-stage root PBS array wrappers and the obsolete
+  target-only figure patch. Keep the two generic templates in `pbs_example/`
+  and the unified alignment-input preparation, with default PAF generation.
+- Rebuild generated wheel resources from the current core asset list, so an
+  older local build cache cannot reintroduce removed workflow entries.
+- Count reference sequence bases without FASTA whitespace in Step3; LF and
+  CRLF inputs now give the same contig breadth. Existing summaries must be
+  recalculated; reads, assembly, mapping thresholds and PAF spans are unchanged.
+- Reject duplicate seeds/designs/run IDs and the inconsistent `copy_number`
+  mode before execution. Keep supported `read_fraction` calculations unchanged.
+- Resolve the optional VAMB log environment without requiring an exported
+  `RRMG_CONDA_ENV`; detect/configure Windows R without a personal library default.
+- Preserve existing site deployment files, plans and results. No Git history
+  rewrite, license selection, release tag or automatic push is performed.
+
 ## 0.3.1 — 2026-10-15
 
 - Document Conda-managed versus external BBMap, both required launchers,

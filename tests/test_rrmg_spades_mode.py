@@ -135,6 +135,33 @@ class SpadesModeTests(unittest.TestCase):
         self.assertFalse((self.run_dir / 'STEP3_SUCCESS').exists())
         self.assertFalse((self.run_dir / 'asm/RRMG_ASSEMBLY_MODE').exists())
 
+    def test_fasta_line_endings_do_not_change_contig_breadth(self):
+        # Nine covered bases in a 12-base wrapped reference must be 75%,
+        # regardless of whether it was saved on Linux or Windows.
+        minimap = self.root / 'bin/minimap2'
+        minimap.write_text('#!' + sys.executable + '\n'
+                           'print("contig\\t12\\t0\\t9\\t+\\ttoy\\t12\\t0\\t9\\t9\\t9\\t60")\n')
+        self.gene.write_bytes(b'>toy\nACGTAC\nGTACGT\n')
+        self.stage3()
+        with (self.run_dir / 'map/target_call_summary.tsv').open() as f:
+            linux = next(csv.DictReader(f, delimiter='\t'))
+        self.assertEqual(linux['HasHit'], 'Y')
+        self.assertEqual(linux['TargetCoveredBp'], '9')
+        self.assertEqual(linux['TargetBreadthPct'], '75.000000')
+        protected = [self.run_dir / 'asm/contigs.fasta',
+                     self.run_dir / 'qc/Toy.Seed1.fastp.json',
+                     self.run_dir / 'qc/Toy.Seed1_1.fastq.gz',
+                     self.run_dir / 'qc/Toy.Seed1_2.fastq.gz']
+        before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in protected}
+        self.gene.write_bytes(b'>toy\r\nACGTAC\r\nGTACGT\r\n')
+        self.stage3('--force', '--skip-qc', '--skip-assemble')
+        with (self.run_dir / 'map/target_call_summary.tsv').open() as f:
+            windows = next(csv.DictReader(f, delimiter='\t'))
+        self.assertEqual(windows['TargetBreadthPct'], linux['TargetBreadthPct'])
+        self.assertEqual(windows['TargetCoveredBp'], linux['TargetCoveredBp'])
+        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual(before, {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in protected})
+
 
 if __name__ == '__main__':
     unittest.main()

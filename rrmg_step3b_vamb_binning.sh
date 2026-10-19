@@ -233,17 +233,18 @@ if [[ -e "$VAMB_OUT" ]]; then
 fi
 rm -f "$SUCCESS_MARKER"
 
+ACTIVE_ENV="${RRMG_CONDA_ENV:-${CONDA_DEFAULT_ENV:-active-PATH}}"
 for executable in minimap2 samtools python3; do
   if ! "$executable" --version >/dev/null 2>&1; then
     if [[ "$executable" == "python3" ]] && python3 -V >/dev/null 2>&1; then
       continue
     fi
-    echo "[ERROR] Command is unavailable in conda env ${RRMG_CONDA_ENV}: $executable" >&2
+    echo "[ERROR] Command is unavailable in environment ${ACTIVE_ENV}: $executable" >&2
     exit 1
   fi
 done
 if ! "$VAMB_COMMAND" --help >/dev/null 2>&1; then
-  echo "[ERROR] VAMB is unavailable in conda env ${RRMG_CONDA_ENV}: $VAMB_COMMAND" >&2
+  echo "[ERROR] VAMB is unavailable in environment ${ACTIVE_ENV}: $VAMB_COMMAND" >&2
   exit 1
 fi
 
@@ -265,7 +266,7 @@ echo "Run ID          : $RUN_ID"
 echo "Reads           : $READ_SOURCE ($READ_R1 / $READ_R2)"
 echo "Contigs         : $CONTIGS"
 echo "Target reference: $TARGET_REF"
-echo "Conda env       : $RRMG_CONDA_ENV"
+echo "Environment     : $ACTIVE_ENV"
 echo "VAMB mode       : $VAMB_MODE"
 echo "VAMB version    : $VAMB_VERSION"
 echo "VAMB model seed : $VAMB_SEED"

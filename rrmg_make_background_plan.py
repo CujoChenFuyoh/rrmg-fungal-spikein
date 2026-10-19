@@ -315,6 +315,8 @@ def main():
     print("[INFO] length_cache={}".format(length_cache_path), flush=True)
 
     plan_rows = read_plan(plan_path)
+    if any((row.get("abundance_mode") or "read_fraction") != "read_fraction" for row in plan_rows):
+        raise SystemExit("[ERROR] Only read_fraction is supported; copy_number planning/execution are not equivalent")
     manifests, fastas = collect_needed_fastas(wd, plan_rows)
     print("[INFO] unique manifests: {}".format(len(manifests)), flush=True)
     print("[INFO] unique background FASTAs: {}".format(len(fastas)), flush=True)
@@ -398,7 +400,7 @@ def main():
     print("[OK] Wrote: {}".format(bg_plan), flush=True)
     print("[OK] Wrote: {}".format(bg_index), flush=True)
     print("[OK] Length cache: {}".format(length_cache_path), flush=True)
-    print("[OK] Submit Step 1 array as: qsub -J 1-{} rrmg_step1_background_array.pbs".format(len(jobs)), flush=True)
+    print("[NEXT] Run backgrounds: bash rrmg_submit.sh step1 1-{}".format(len(jobs)), flush=True)
 
 
 if __name__ == "__main__":

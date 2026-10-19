@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Portable adaptation: run through rrmg_windows_r.sh to use Windows R libraries.
+# Gene-alignment and reference-site coverage figures; native R or Windows R in WSL.
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 2) stop("Usage: Rscript rrmg_plot_alignment.R INPUT_DIR OUTPUT_DIR")
 input_dir <- normalizePath(args[1], mustWork = TRUE)
@@ -15,30 +15,22 @@ base_out <- job$stage
 
 
 #===============================================================================
-# CYP51A mechanism visualization from RRMG figure_data
+# CYP51A alignment and reference-site coverage from RRMG figure_data
 #
-# Updated version:
-#   1. Adds target-only synthetic Afum reads mapped to CYP51A.
-#   2. Swaps read-set colors:
-#        Spiked metagenome reads      = orange
-#        Synthetic raw genome reads   = grey baseline
-#   3. Read-depth panel is now filled area/peak plot rather than only line plot.
-#   4. Read-block layer is NOT included in the main mechanism figure.
-#      It is exported separately as:
-#        - one PDF per run
-#        - one multi-page PDF across runs
-#        - one TSV summary of read-block PAF statistics
+# Read sets: mixed metagenome QC = orange; target-only synthetic reads = grey.
+# Depth panels show overlapping coverage areas. Read blocks are exported as
+# separate per-run and multi-page figures with a TSV alignment summary.
 #
 # Required input:
 #   figure_data/CYP51A_alignment/plot_manifest.with_target_only.tsv
 #   or figure_data/CYP51A_alignment/plot_manifest.tsv
 #
-# Existing files:
+# Mixed-read and contig inputs:
 #   <PlotID>/contigs_to_GENE.paf
 #   <PlotID>/reads_to_GENE.depth.tsv
 #   <PlotID>/reads_to_GENE.paf.gz
 #
-# New target-only files:
+# Target-only inputs:
 #   <PlotID>/target_only_reads_to_GENE.depth.tsv
 #   <PlotID>/target_only_reads_to_GENE.paf.gz
 #
@@ -111,7 +103,7 @@ FUNGAMR_GUIDE_COLOR <- "#B04A9F"
 FUNGAMR_GUIDE_ALPHA <- 0.38
 FUNGAMR_GUIDE_LINEWIDTH <- 0.23
 
-# Color rule requested:
+# Read-set colors:
 #   Spiked metagenome reads = orange, more visually prominent
 #   Synthetic raw genome reads = grey baseline
 READ_SET_LEVELS <- c("Synthetic raw genome reads", "Spiked metagenome reads")

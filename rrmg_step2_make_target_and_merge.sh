@@ -111,11 +111,15 @@ def is_target(r, target_name, target_taxid, target_gid):
 
 with plan.open(newline='') as fh:
     reader=csv.DictReader(fh, delimiter='\t')
-    chosen=None
-    for row in reader:
-        if int(row.get('run_index','0') or 0)==row_index:
-            chosen=row; break
+    plan_rows=list(reader)
+indices=[r.get('run_index','') for r in plan_rows]
+run_ids=[r.get('run_id','') for r in plan_rows if r.get('run_id')]
+if len(indices)!=len(set(indices)) or len(run_ids)!=len(set(run_ids)):
+    raise SystemExit('[ERROR] Duplicate plan index/run_id; output directories must be unique')
+chosen=next((row for row in plan_rows if int(row.get('run_index','0') or 0)==row_index), None)
 if chosen is None: raise SystemExit(f'[ERROR] Row index not found: {row_index}')
+if (chosen.get('abundance_mode') or 'read_fraction') != 'read_fraction':
+    raise SystemExit('[ERROR] Only read_fraction is supported; copy_number planning/execution are not equivalent')
 
 manifest=resolve(chosen.get('manifest',''))
 ta=float(chosen.get('target_abundance') or 0)

@@ -3,9 +3,9 @@
 
 """Collect all per-run CYP51A read-depth summaries into one TSV.
 
-Run this only after every selected Step 4 array job has finished. The script
-does not calculate coverage itself; it concatenates the identically structured
-``*/readmap/reads_to_GENE.coverage_summary.tsv`` files.
+Collect the available ``*/readmap/reads_to_GENE.coverage_summary.tsv`` files.
+This merges existing summaries rather than calculating coverage. Partial cohorts
+are allowed; compare collected RunIDs with the plan before interpreting results.
 """
 
 import argparse

@@ -178,12 +178,19 @@ with open(table, newline='') as fh:
     reader = csv.DictReader(fh, delimiter='\t')
     if key not in (reader.fieldnames or []):
         raise SystemExit('[ERROR] Missing index column: ' + key)
-    raw = [r[key] for r in reader]
+    records = list(reader)
+    raw = [r[key] for r in records]
 if not raw or any(not re.fullmatch(r'[1-9][0-9]*', s or '') for s in raw):
     raise SystemExit('[ERROR] Plan indices must be positive integers')
 ids = list(map(int, raw))
 if len(ids) != len(set(ids)):
     raise SystemExit('[ERROR] Duplicate plan indices')
+if key == 'run_index' and 'run_id' in (reader.fieldnames or []):
+    run_ids = [r.get('run_id', '') for r in records]
+    if any(not re.fullmatch(r'[A-Za-z0-9_.-]+', rid or '') or rid in ('.', '..') for rid in run_ids):
+        raise SystemExit('[ERROR] Unsafe or empty run_id')
+    if len(run_ids) != len(set(run_ids)):
+        raise SystemExit('[ERROR] Duplicate run_id: output directories must be unique')
 chosen = ids
 if selection:
     if not re.fullmatch(r'[1-9][0-9]*(?:-[1-9][0-9]*)?', selection):

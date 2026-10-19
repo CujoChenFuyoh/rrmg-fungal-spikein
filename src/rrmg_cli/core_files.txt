@@ -6,6 +6,10 @@ environment.yml
 .gitignore
 docs/INSTALL.zh-CN.md
 docs/BBMAP.zh-CN.md
+docs/QUICKSTART.zh-CN.md
+docs/WORKFLOW.md
+docs/TROUBLESHOOTING.zh-CN.md
+docs/REVIEW_CHECKLIST.zh-CN.md
 rrmg_config.example.sh
 rrmg_run_local.sh
 rrmg_run_one.sh
@@ -25,15 +29,10 @@ rrmg_test_randomreadsmg_genomes.sh
 rrmg_make_plan.py
 rrmg_make_background_plan.py
 rrmg_step1_make_background_reads.sh
-rrmg_step1_background_array.pbs
 rrmg_step2_make_target_and_merge.sh
-rrmg_step2_target_merge_array.pbs
 rrmg_step3_downstream_analysis.sh
-rrmg_step3_downstream_array.pbs
 rrmg_step3b_vamb_binning.sh
-rrmg_step3b_vamb_array.pbs
 rrmg_step4_5_supplementary_downstream.sh
-rrmg_step4_5_supplementary_downstream_array.pbs
 rrmg_step4_reads_to_gene_depth.sh
 rrmg_step5_afum_target_reads_genome_cov.sh
 rrmg_collect_map_results.py
@@ -42,7 +41,6 @@ rrmg_collect_afum_genome_cov.py
 rrmg_collect_vamb_results.py
 rrmg_collect_supplementary_downstream.sh
 rrmg_evaluate_vamb_bins.py
-rrmg_add_target_only_cyp51a_to_figure_data.py
 runbook.sh
 RUNBOOK_FIGURES_README.txt
 rrmg_windows_r.sh
