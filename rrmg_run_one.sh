@@ -92,6 +92,7 @@ case "$STEP" in
     ARGS=("$PLAN" "$ROW" -w "$WD" -gene "$GENE_REF" --target-genome "$TARGET_GENOME")
     [[ "$STEP" == step4 ]] && ARGS+=(--skip-target-genome)
     [[ "$STEP" == step5 ]] && ARGS+=(--skip-read-to-gene)
+    [[ "${STEP4_MAP_TARGET_ONLY:-1}" == 0 && "$STEP" != step5 ]] && ARGS+=(--skip-target-only-gene)
     [[ "${STEP45_MAKE_BINS:-1}" == 1 ]] && ARGS+=(--make-bins --bin-size "${STEP45_BIN_SIZE:-10000}")
     force_arg "${STEP45_FORCE:-0}"
     ;;

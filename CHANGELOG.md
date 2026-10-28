@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.3 — 2026-10-28
+
+- Extend Step4 to map both mixed metagenome reads and retained target-only
+  reads to the target gene, producing independent BAM, PAF, per-base depth and
+  coverage summaries. Resume each read set independently so existing audited
+  mixed-read outputs are not recomputed merely to add target-only results.
+- Replace post-analysis remapping with a read-only collector that validates and
+  packages existing Step3-5 outputs into one portable `figure_data/` snapshot.
+- Simplify the runbook ending to two stages: collect/audit figure inputs on
+  Linux, then download the bundle and render both R figure families on Windows.
+- Add a Windows PowerShell plotting launcher and retain fixed, separate
+  `figure_data/` input and `figure_output/` rendering directories.
+- Collect mixed-read and target-only-read Step4 summaries separately, then
+  require exact plan membership before creating a complete figure-data bundle.
+
 ## 0.3.2 — 2026-10-19
 
 - Consolidate user documentation into quick start, installation, workflow,

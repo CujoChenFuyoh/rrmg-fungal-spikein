@@ -47,10 +47,12 @@ rrmg run step1 -t 4 -m 4 --jobs 1
 rrmg run step2 1-2 -t 1 -m 4 --jobs 1
 rrmg run step3 1-2 -t 4 -m 16 --jobs 1
 rrmg run step4 1-2 -t 4 --jobs 1
+rrmg run step5 1-2 -t 4 --jobs 1
 ```
 
-Step2合成和混合reads；Step3进行fastp、组装和contig mapping；Step4产生reads
-覆盖度、depth及PAF。默认保留PAF，供read/contig alignment-block图使用。
+Step2合成和混合reads；Step3进行fastp、组装和contig mapping；Step4同时产生
+mixed-QC和target-only reads到目标基因的覆盖度、depth及PAF。默认保留PAF，
+供read/contig alignment-block图使用。
 Step3默认 `--only-assembler`，保留fastp，跳过BayesHammer。
 
 每个阶段有 `logs/local/<调用目录>/summary.tsv` 和 `row_<ID>.log`。
@@ -70,22 +72,18 @@ Step3默认 `--only-assembler`，保留fastp，跳过BayesHammer。
 
 ```bash
 source "$RRMG_CONFIG"
-python3 "$PIPELINE_DIR/rrmg_collect_map_results.py" \
-  --summary "$WD/result/rrmg_split_pipeline_summary.tsv" \
-  --plan "$WD/input/rrmg/rrmg_permutation_plan.tsv" \
-  --root "$WD/temp/rrmg_permutation" \
-  --out "$WD/result/rrmg_target_gene_map_merged.tsv" --wd "$WD"
-python3 "$PIPELINE_DIR/rrmg_collect_reads_to_gene_depth.py" \
-  --root "$WD/temp/rrmg_permutation" \
-  --out "$WD/result/rrmg_reads_to_gene_depth_summary.tsv"
+bash "$PIPELINE_DIR/rrmg_collect_figure_data.sh" \
+  --wd "$WD" --gene "$WD/ref/CYP51A_wt.fasta"
 ```
 
 随后按[绘图说明](../RUNBOOK_FIGURES_README.txt)生成总体图及alignment-block图。
-后者需要contig→gene、mixed-QC→gene、target-only→gene三类PAF与对应depth；
-图形输入准备完成后，仅重画图不需要再次运行比对。
+该命令核对并收集contig→gene、mixed-QC→gene、target-only→gene三类PAF与
+对应depth，不重新运行比对。下载完整 `figure_data/` 后在Windows运行仓库中的
+`rrmg_plot_all_windows.ps1`；仅重画图不需要服务器分析文件。
 
-Step5是另一个可选分析：`rrmg run step5 1-2 -t 4 --jobs 1`，
-测量target-only reads对**整个基因组**的覆盖，不能替代target-only→gene的PAF。
+Step5测量target-only reads对**整个基因组**的覆盖，不能替代target-only→gene的PAF。
+它对仅做基因检出是可选的，但“汇总全部绘图输入”需要其summary和coverage bins，
+所以上述完整绘图示例包含Step5。
 
 ## 5. 放到服务器
 

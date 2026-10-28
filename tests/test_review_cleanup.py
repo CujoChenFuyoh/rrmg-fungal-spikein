@@ -142,6 +142,26 @@ class CleanupTests(unittest.TestCase):
         names = (REPO / 'src/rrmg_cli/core_files.txt').read_text().splitlines()
         self.assertNotIn('rrmg_add_target_only_cyp51a_to_figure_data.py', names)
 
+    def test_runbook_python_heredocs_compile(self):
+        lines = (REPO / 'runbook.sh').read_text(encoding='utf-8').splitlines()
+        starts = []
+        index = 0
+        while index < len(lines):
+            if "<<'PY'" not in lines[index] and '<<"PY"' not in lines[index]:
+                index += 1
+                continue
+            start = index + 2
+            index += 1
+            body = []
+            while index < len(lines) and lines[index] != 'PY':
+                body.append(lines[index])
+                index += 1
+            self.assertLess(index, len(lines), 'Unterminated Python heredoc')
+            compile('\n'.join(body) + '\n', f'runbook.sh:{start}', 'exec')
+            starts.append(start)
+            index += 1
+        self.assertTrue(starts, 'No Python heredocs found in runbook')
+
     def test_removed_wrappers_are_absent_and_generic_templates_remain(self):
         names = (REPO / 'src/rrmg_cli/core_files.txt').read_text().splitlines()
         for name in ('rrmg_step1_background_array.pbs', 'rrmg_step2_target_merge_array.pbs',

@@ -84,6 +84,15 @@ bash "$REPO/rrmg_step3_downstream_analysis.sh" "$WD/input/rrmg/plan.tsv" 1 \
   -w "$WD" -gene "$WD/ref/target.fasta" --skip-kraken --skip-assemble -t 2 -mem 1
 THREADS=2 bash "$REPO/rrmg_step4_reads_to_gene_depth.sh" "$WD/input/rrmg/plan.tsv" 1 \
   -w "$WD" -gene "$WD/ref/target.fasta"
+for output in \
+  "$RUN/readmap/reads_to_GENE.coverage_summary.tsv" \
+  "$RUN/readmap/reads_to_GENE.depth.tsv" \
+  "$RUN/readmap/reads_to_GENE.paf.gz" \
+  "$RUN/readmap/target_only_reads_to_GENE.coverage_summary.tsv" \
+  "$RUN/readmap/target_only_reads_to_GENE.depth.tsv" \
+  "$RUN/readmap/target_only_reads_to_GENE.paf.gz"; do
+  [[ -s "$output" ]] || { echo "[TEST ERROR] Missing Step4 output: $output" >&2; exit 1; }
+done
 THREADS=2 bash "$REPO/rrmg_step5_afum_target_reads_genome_cov.sh" "$WD/input/rrmg/plan.tsv" 1 \
   -w "$WD" --target-genome "$WD/ref/target.fasta"
 

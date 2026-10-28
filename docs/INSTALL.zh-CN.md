@@ -37,7 +37,7 @@ python -m pip install 'git+https://github.com/CujoChenFuyoh/rrmg-fungal-spikein.
 rrmg init --workdir /path/to/SpikeIN
 ```
 
-不指定 `--pipeline-dir` 时，核心代码冻结到 `.rrmg/core-0.3.2/`，防止以后的 pip 升级悄悄替换当前实验代码。
+不指定 `--pipeline-dir` 时，核心代码冻结到当前安装版本对应的 `.rrmg/core-<version>/`，防止以后的 pip 升级悄悄替换当前实验代码。
 Git URL 只能安装已经推送的代码；本地改动使用 `pip install .`。
 可用 `rrmg export /path/to/new_core` 导出带校验清单的核心代码和 examples；不会覆盖已有目录。
 离线安装可先 `python -m pip wheel --no-deps . -w dist`，复制 wheel 后用 `pip install --no-index --no-deps 文件.whl`。

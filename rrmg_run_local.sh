@@ -12,7 +12,7 @@ STEP:
   step2   target-read simulation and merge
   step3   QC, optional Kraken2, assembly, and target-gene mapping
   step3b  one-permutation VAMB binning
-  step4   QC-read to target-gene depth
+  step4   mixed and target-only reads to target-gene depth/PAF
   step5   target-only read to target-genome coverage
   step45  optional read-depth and target-genome coverage analyses
 

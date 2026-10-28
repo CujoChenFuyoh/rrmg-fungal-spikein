@@ -3,7 +3,7 @@ include rrmg_config.example.sh
 include rrmg_run_local.sh rrmg_submit.sh rrmg_preflight.sh
 include rrmg_run_one.sh rrmg_environment.sh
 include rrmg_mix_paired_fastq.py
-include runbook.sh RUNBOOK_FIGURES_README.txt rrmg_windows_r.sh
+include runbook.sh RUNBOOK_FIGURES_README.txt rrmg_windows_r.sh rrmg_plot_all_windows.ps1
 include rrmg_plot_preview.R rrmg_plot_alignment.R rrmg_plot_common.R rrmg_prepare_alignment_inputs.py
 recursive-include examples *.sh *.pbs *.tsv *.md
 recursive-include pbs_example *.pbs *.md
@@ -17,6 +17,7 @@ include rrmg_step4_5_supplementary_downstream.sh
 include rrmg_step4_reads_to_gene_depth.sh rrmg_step5_afum_target_reads_genome_cov.sh
 include rrmg_collect_map_results.py rrmg_collect_reads_to_gene_depth.py rrmg_collect_afum_genome_cov.py
 include rrmg_collect_vamb_results.py rrmg_collect_supplementary_downstream.sh
+include rrmg_collect_figure_data.py rrmg_collect_figure_data.sh
 include rrmg_evaluate_vamb_bins.py
 recursive-include docs *.md
 recursive-include .github *.yml *.yaml

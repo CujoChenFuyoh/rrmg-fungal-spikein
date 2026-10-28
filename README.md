@@ -1,6 +1,6 @@
 # RRMG fungal spike-in workflow
 
-Version `0.3.2`; release notes are in [CHANGELOG.md](CHANGELOG.md).
+Version `0.3.3`; release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 RRMG evaluates target-gene recovery across metagenomic background, target
 read fraction, sequencing depth and random-seed combinations. It generates
@@ -43,13 +43,14 @@ rrmg run step1 -t 4 -m 4 --jobs 1
 rrmg run step2 1-2 -t 1 -m 4 --jobs 1
 rrmg run step3 1-2 -t 4 -m 16 --jobs 1
 rrmg run step4 1-2 -t 4 --jobs 1
-# Optional target-only whole-genome coverage:
-# rrmg run step5 1-2 -t 4 --jobs 1
+# Required by the complete figure-data bundle; optional for gene-only analysis:
+rrmg run step5 1-2 -t 4 --jobs 1
 ```
 
-Step3 includes fastp QC, metaSPAdes and contig-to-gene mapping. Step4 retains
-read PAFs for alignment-block plots. Complete figure preparation additionally
-maps retained target-only reads to the gene; see the figure guide.
+Step3 includes fastp QC, metaSPAdes and contig-to-gene mapping. Step4 maps both
+mixed metagenome QC reads and retained target-only reads to the target gene,
+retaining PAF and per-base depth for alignment-block plots. Step5 remains the
+separate target-only-read to whole-genome coverage analysis.
 
 `rrmg run` executes inside the current allocation and never submits jobs.
 `--jobs` controls concurrent rows; `-t` and `-m` apply per row. Put the same
@@ -62,13 +63,18 @@ analysis engine. New scheduler examples live only in `pbs_example/`.
 
 - **Assembly recovery:** Steps1–3, then collect contig mapping results.
 - **Read and contig comparison:** add Step4 and retain PAF/depth outputs.
-- **Alignment/site figures:** prepare the three gene-alignment sources and run
-  the alignment plotter. Reference-site annotations are optional.
+- **Alignment/site figures:** Step3 plus Step4 produce all three gene-alignment
+  sources. Collect a portable `figure_data/` bundle, then render it locally.
 - **Additional diagnostics:** Step5 whole-genome coverage, Kraken2 and VAMB
   (`step3b`) are optional. Step5 coverage windows are not metagenomic bins.
 
-For complete read/contig figures, retain mixed-QC reads, target-only reads,
-contigs and per-base depths until alignment-input preparation succeeds.
+The unified all-figure collector includes the Step5 whole-genome panels and
+therefore requires completed Step5 summaries/windows. Step5 remains optional if
+only the gene-level Step3/4 outputs are needed.
+
+For complete read/contig figures, retain target-only reads through Step4. After
+the complete `figure_data/` bundle has been verified and backed up, plotting no
+longer needs FASTQ, BAM or contig FASTA files.
 
 ## Data layout and interpretation
 

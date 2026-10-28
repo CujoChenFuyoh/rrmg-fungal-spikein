@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
-# Gene-alignment and reference-site coverage figures; native R or Windows R in WSL.
+# Gene-alignment and reference-site coverage figures; native R or local Windows R.
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 2) stop("Usage: Rscript rrmg_plot_alignment.R INPUT_DIR OUTPUT_DIR")
 input_dir <- normalizePath(args[1], mustWork = TRUE)
-if (!file.exists(file.path(input_dir, "COMPLETE.json"))) stop("Alignment inputs are incomplete; complete runbook section 14 first.")
+if (!file.exists(file.path(input_dir, "COMPLETE.json"))) stop("Alignment inputs are incomplete; complete runbook section 13 first.")
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)[1])
 source(file.path(dirname(normalizePath(script_file, mustWork = TRUE)), "rrmg_plot_common.R"))
 # Wrap execution so errors clean up only this invocation's staging directory.

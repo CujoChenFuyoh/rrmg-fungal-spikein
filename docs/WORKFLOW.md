@@ -12,13 +12,13 @@
 | Step1 | `rrmg_step1_make_background_reads.sh` | Background designs | Paired background FASTQ and pair-count audit |
 | Step2 | `rrmg_step2_make_target_and_merge.sh` | Plan, background index/FASTQ, target genome | Exact mixed pairs, retained target pairs, generation audit |
 | Step3 | `rrmg_step3_downstream_analysis.sh` | Mixed reads, gene FASTA | fastp QC, metaSPAdes contigs, contig-to-gene summary |
-| Step4 | `rrmg_step4_reads_to_gene_depth.sh` | QC reads, gene FASTA | BAM, per-base depth, coverage summary, read PAF.gz |
+| Step4 | `rrmg_step4_reads_to_gene_depth.sh` | Mixed-QC reads, retained target-only reads, gene FASTA | Independent BAM, per-base depth, summary and PAF.gz for both read sets |
 | Step5 (optional) | `rrmg_step5_afum_target_reads_genome_cov.sh` | Target-only reads, genome | Genome coverage and optional windows |
 | Step45 | `rrmg_step4_5_supplementary_downstream.sh` | Step4/5 inputs | Both analyses; individual steps skip the other branch |
 | Step3b (optional) | `rrmg_step3b_vamb_binning.sh` | QC reads, contigs, target reference | VAMB bins and recovery metrics |
 | Collect | `rrmg_collect_*.py` | Existing outputs and plan | Merged TSVs |
 | Summary figures | `rrmg_plot_preview.R` | Plan, summaries, per-base depths | Summary figures, source tables, missingness audit |
-| Alignment inputs | `rrmg_prepare_alignment_inputs.py` | Contigs, QC and target-only reads, gene | Three PAF sources, depths, manifest, `COMPLETE.json` |
+| Figure-data collection | `rrmg_collect_figure_data.sh` | Completed Step3-5 outputs, plan, gene | Portable summaries, three PAF sources, depths, bins, manifests and `COMPLETE.json` |
 | Alignment figures | `rrmg_plot_alignment.R` | Complete alignment inputs | Contig/read blocks, depths and optional reference-site coverage |
 
 Backgrounds are shared across seeds for one design condition. Step2 varies
@@ -32,12 +32,11 @@ before downstream outputs are reused.
   MAPQ>=20. `HasHit` follows the surviving alignments; it is not a predeclared
   clinical sensitivity/specificity threshold. No extra minimum gene breadth or
   identity criterion is imposed by that field.
-- Step4 maps mixed-QC reads with `sr --secondary=no`, reports the current
-  samtools-depth coverage and produces a PAF for read-block display.
-- Alignment-input preparation uses `asm5 --secondary=no -c` for contigs and
-  does not apply Step3's MAPQ>=20 breadth filter. Its display breadth can therefore
-  differ from the Step3 summary. Preserve these labels until a common definition
-  is chosen; do not copy a contig PAF between stages as if definitions matched.
+- Step4 maps mixed-QC and target-only reads independently with
+  `sr --secondary=no`, reports samtools-depth coverage and produces both PAFs
+  for read-block display.
+- Figure-data collection reuses Step3's contig PAF and applies the same
+  MAPQ>=20 filter used by the Step3 breadth summary before local display.
 - Target-only-to-gene alignment controls describe the simulated target source.
   Step5 aligns that source to the whole genome and answers a different question.
 - The empty VCF / `VarN=0` in Step3 is a legacy placeholder for variant analysis
@@ -45,17 +44,17 @@ before downstream outputs are reused.
 
 ## Mapping work and reuse
 
-With gene mapping, default Step4 PAF and full alignment preparation, each run
-usually invokes minimap2 eight times: Step3=1, Step4=2, figure preparation=5.
-Step5 adds one whole-genome call; optional species mapping/VAMB add other work.
-The mixed-QC pair is scanned four times across Step4 and figure preparation.
+With complete gene mapping, each run invokes minimap2 five times: Step3=1,
+Step4 mixed reads=2 and Step4 target-only reads=2. Step5 adds one whole-genome
+call; optional species mapping/VAMB add other work. Figure-data collection adds
+no minimap2 or samtools call.
 
 The three PAF sources are required for complete read/contig block figures.
 This workflow retains them by default. The low-level Step4 `--no-paf` option
 only serves a coverage-only use case and is not the recommended figure workflow.
-Currently figure preparation recomputes alignments; rerendering existing complete
-figure inputs does not. Automatic reuse awaits matching fingerprints for reference,
-read generation, parameters and tool versions; see the review checklist.
+Step4 resumes the two read sets independently using the mix-generation audit.
+Figure collection validates and copies the completed outputs; rerendering the
+portable bundle does not require FASTQ, BAM, contigs or an aligner.
 
 ## Resource and completion rules
 

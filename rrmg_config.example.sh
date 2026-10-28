@@ -78,6 +78,8 @@ VAMB_USE_CUDA=0
 VAMB_FORCE=0
 
 STEP45_THREADS=4
+# Step4 maps both mixed metagenome reads and retained target-only reads to GENE_REF.
+STEP4_MAP_TARGET_ONLY=1
 STEP45_BIN_SIZE=10000
 STEP45_MAKE_BINS=1
 STEP45_FORCE=0

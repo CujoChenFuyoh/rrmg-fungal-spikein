@@ -1,6 +1,7 @@
 """Reference-coordinate and input-safety tests; all generated data are toy fixtures."""
 import importlib.util
 import argparse
+import gzip
 import subprocess
 import sys
 import tempfile
@@ -57,15 +58,13 @@ class AlignmentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mod.validated_sites(self.gene, self.sites, self.catalogue)
 
-    def test_missing_mate_or_ambiguous_reads_rejected(self):
-        (self.root / "a_1.fastq.gz").write_bytes(b"fixture")
-        with self.assertRaises(ValueError):
-            mod.paired_reads(self.root, "*_1.fastq.gz")
-        (self.root / "a_2.fastq.gz").write_bytes(b"fixture")
-        self.assertEqual(len(mod.paired_reads(self.root, "*_1.fastq.gz")), 2)
-        (self.root / "b_1.fastq.gz").write_bytes(b"fixture")
-        with self.assertRaises(ValueError):
-            mod.paired_reads(self.root, "*_1.fastq.gz")
+    def test_depth_and_gzip_paf_validation(self):
+        depth = self.root / "depth.tsv"
+        depth.write_text("".join(f"toy\t{i}\t{i % 2}\n" for i in range(1, 10)))
+        self.assertAlmostEqual(mod.depth_stats(depth, "toy", 9), 100 * 5 / 9)
+        with gzip.open(self.root / "reads.paf.gz", "wt") as handle:
+            handle.write("q\t9\t0\t9\t+\ttoy\t9\t0\t9\t9\t9\t60\n")
+        self.assertEqual(mod.paf_stats(self.root / "reads.paf.gz", "toy", 9), (1, 100.0))
 
     def test_empty_paf_is_valid_zero_hit(self):
         paf = self.root / "test.paf"
@@ -88,6 +87,29 @@ class AlignmentTests(unittest.TestCase):
         self.assertIn("--catalogue: Empty file path", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertFalse((self.root / "out").exists())
+
+    def test_collects_existing_step3_step4_outputs_without_mapping(self):
+        plan = self.root / "input/rrmg/rrmg_permutation_plan.tsv"
+        plan.parent.mkdir(parents=True)
+        plan.write_text(
+            "run_index\trun_id\tseed\ttarget_abundance\ttotal_pairs\n"
+            "1\trun1\t1\t0.01\t1000\n"
+        )
+        run = self.root / "temp/rrmg_permutation/run1"
+        (run / "asm").mkdir(parents=True)
+        (run / "readmap").mkdir()
+        (run / "asm/contigs.fasta.to_GENE.paf").touch()
+        depth_text = "".join(f"toy\t{i}\t1\n" for i in range(1, 10))
+        for prefix in ("reads_to_GENE", "target_only_reads_to_GENE"):
+            (run / f"readmap/{prefix}.depth.tsv").write_text(depth_text)
+            with gzip.open(run / f"readmap/{prefix}.paf.gz", "wt") as handle:
+                handle.write("q\t9\t0\t9\t+\ttoy\t9\t0\t9\t9\t9\t60\n")
+        out = self.root / "collected"
+        count, sites = mod.build_alignment_bundle(self.root, self.gene, out)
+        self.assertEqual((count, sites), (1, 0))
+        self.assertTrue((out / "row_00001/reads_to_GENE.paf.gz").is_file())
+        self.assertTrue((out / "row_00001/target_only_reads_to_GENE.depth.tsv").is_file())
+        self.assertTrue((out / "COMPLETE.json").is_file())
 
     def test_fixed_output_rerun_and_failure(self):
         out = self.root / "fixed"

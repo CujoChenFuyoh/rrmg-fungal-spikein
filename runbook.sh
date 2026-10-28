@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RRMG 0.3.2 本地 Ubuntu/WSL 逐段运行手册
+# RRMG 0.3.3 本地 Ubuntu/WSL 逐段运行手册
 # ------------------------------------------------------------
 # 用法：在编辑器打开本文件，按编号依次复制到同一个 Ubuntu Bash 终端。
 # 带反斜杠的多行命令、if/fi、Python heredoc 必须作为一个完整块执行。
@@ -161,7 +161,7 @@ cp -- "$CODE/VERSION" "$WD/result/workflow_VERSION.txt"
 git -C "$CODE" rev-parse HEAD > "$WD/result/workflow_commit.txt"
 git -C "$CODE" status --short > "$WD/result/workflow_status.txt"
 # 本地未提交修改不会由 commit SHA 代表，因此另存实际核心脚本快照。
-rrmg export "$WD/code_snapshot_0.3.2"
+rrmg export "$WD/code_snapshot_0.3.3"
 
 
 # ===== 5. 生成测试 plan 和背景设计（只做一次） =====
@@ -250,16 +250,18 @@ find "$WD/temp/rrmg_permutation" -path '*/design/read_mix_audit.tsv' -type f -si
 bash "$CODE/rrmg_submit.sh" step3 1-2 -t 4 -m 16 --jobs 1
 find "$WD/temp/rrmg_permutation" -path '*/asm/contigs.fasta' -type f -size +0c -print
 # 应看到两个 contigs.fasta。无目标基因命中不等于 assembly 运行失败。
-# 重新拼接后继续第 11–15 段，重收集 contig 汇总并重建绘图输入；不能只重画旧汇总。
+# 重新拼接后继续第 11–14 段，重收集汇总并重建 figure_data；不能只重画旧汇总。
 
 
-# ===== 9. Step4：QC reads → CYP51A，得到 per-base depth/coverage =====
+# ===== 9. Step4：mixed QC + target-only reads → CYP51A =====
 # 设置参数（线程直接写在下面命令；无需编辑 config）：
 #   -t 4 / --threads 4          # 每个样品的 minimap2/samtools 线程数
 #   GENE_REF="ref/CYP51A_wt.fasta"  # 相对 WD 或绝对路径；必须与后续绘图参考一致
 # Step4 没有可靠的程序总内存参数，因此不接受 -m；PBS mem 在作业脚本中按服务器设置。
 # 提交范围和 --jobs 规则与 Step2 相同；PBS ncpus 至少为 jobs × -t。
-# Step4 依赖 Step3 的 QC reads；--force 只重建本步骤 mapping/depth 输出。
+# Step4 同时使用 Step3 QC reads 和 Step2 保留的 target-only reads；分别生成
+# BAM、逐碱基 depth、coverage summary 和 read-level PAF。旧 mixed-read 结果完整时，
+# 新版只补 target-only mapping；--force 才会重建两类 Step4 输出。
 bash "$CODE/rrmg_submit.sh" step4 1-2 -t 4 --jobs 1
 # 默认保留PAF用于read-block图；不使用 --no-paf。
 
@@ -310,6 +312,10 @@ assert len(expected) == len(plan), 'Duplicate run_id in plan'
 print('Expected samples:', len(expected))
 required = ['design/read_mix_audit.tsv', 'asm/contigs.fasta', 'map/target_call_summary.tsv',
             'readmap/reads_to_GENE.coverage_summary.tsv', 'readmap/reads_to_GENE.depth.tsv',
+            'readmap/reads_to_GENE.paf.gz',
+            'readmap/target_only_reads_to_GENE.coverage_summary.tsv',
+            'readmap/target_only_reads_to_GENE.depth.tsv',
+            'readmap/target_only_reads_to_GENE.paf.gz',
             'target_readmap/afum_target_reads_to_genome.summary.tsv',
             'target_readmap/afum_target_reads_to_genome.bins.tsv']
 missing_files = []
@@ -323,6 +329,7 @@ for relative in required:
             missing_files.append(str(path))
     print(f'{relative}: {found}/{len(expected)}')
 for name in ['rrmg_target_gene_map_merged.tsv', 'rrmg_reads_to_gene_depth_summary.tsv',
+             'rrmg_target_only_reads_to_gene_depth_summary.tsv',
              'rrmg_afum_target_reads_genome_coverage_summary.tsv']:
     table = rows(wd / 'result' / name)
     ids = [r['RunID'] for r in table]
@@ -364,6 +371,7 @@ PY
 # 主要汇总文件：
 #   $WD/result/rrmg_target_gene_map_merged.tsv
 #   $WD/result/rrmg_reads_to_gene_depth_summary.tsv
+#   $WD/result/rrmg_target_only_reads_to_gene_depth_summary.tsv
 #   $WD/result/rrmg_afum_target_reads_genome_coverage_summary.tsv
 # 深度曲线还需要每个 run/readmap/*.depth.tsv；coverage 窗口图还需要
 # target_readmap/*.bins.tsv。它们已保留在测试目录中，没有删除。
@@ -372,125 +380,60 @@ PY
 # 可以继续生成下一段的 QC 预览，帮助查看结果，但不能据此替代正式重复设计。
 
 
-# ===== 13. 生成可直接查看的 figure output：PNG + PDF + 绘图源数据 =====
-# 分析已完成时，只需恢复第 0 段变量，运行第 11–15 段；不必重跑 Step1–5。
-# 在 Ubuntu/WSL 中调用 Windows 的 Rscript.exe，使用 Windows 的 R 包库。
-# 不调用 /usr/bin/Rscript，也不让 Linux R 加载 Windows 编译的包。
-# 两边路径由包装脚本自动转换；检查依赖，不自动安装/修改 R 包。
-# 总体图使用base R；原生Linux R用法见RUNBOOK_FIGURES_README.txt。
-bash "$CODE/rrmg_windows_r.sh" --check
-test -s "$CODE/rrmg_plot_preview.R"
-
-# 固定目录。新图全部生成成功后替换工具管理的旧输出，过期分页不会混入新结果。
-# 若目录里有手动添加/修改的文件，脚本会拒绝覆盖；请先保存或移动该目录。
-FIG_OUT="$WD/figure_output/local_preview"
-bash "$CODE/rrmg_windows_r.sh" "$CODE/rrmg_plot_preview.R" "$WD" "$FIG_OUT"
-
-printf '\nFigure output: %s\n' "$FIG_OUT"
-ls -lh "$FIG_OUT"/*.png "$FIG_OUT"/*.pdf
-column -t -s $'\t' "$FIG_OUT/sample_status.tsv"
-cat "$FIG_OUT/warnings.txt"
-
-# 主要图片（样品/设计条件多时自动分页）：
-#   overview_01.png / .pdf：gene breadth、gene mean depth、target genome breadth、target pairs 审核。
-#   gene_depth_01.png / .pdf：各重复的目标基因逐碱基深度曲线。
-#   design_hit_rates.png / .pdf：contig/read gene-hit 比例热图，显示有效数/计划数。
-#   contig_metrics_by_design_01.*：contig breadth、covered bp、alignment length、identity。
-#   read_metrics_by_design_01.*：mapped alignments、breadth、mean/max depth、breadth >=5x。
-#   target_genome_metrics_by_design_01.*：target genome 预期/实测深度、breadth、深度比。
-#   target_expected_vs_observed.*：target genome 预期/实测深度及 target pairs 预期/实际散点图。
-#   summary_source_data.tsv / gene_depth_source_data.tsv：图片对应的实际数值。
-#   detection_by_design.tsv：每个设计的 hits、有效分母、计划数与缺失数。
-#   sample_status.tsv / warnings.txt：缺失、target pairs 不一致、深度表与汇总不一致。
-# NA 不补成 0；真正测得的 0 会保留。不同 reference 序列不拼成一条曲线。
-# 检出比例仅是当前样品的描述值，分母是可评价结果数；不是总体灵敏度。
-# 每个条件的 n 从实际表格计算；不足 3 个有效值时只画散点，不画箱线。
-# 不绘制 VarN 占位值，不把未运行的 Kraken/VAMB 当作阴性结果。
-# 下方第 14–15 段补齐原 alignment-block/FungAMR-site 图的输入并出图。
-# 注意 target-only reads -> gene 不等于 Step5 的 target-only reads -> genome。
-# 若需要更多样品，改变 plan 后重新收集并运行本段；默认绘制 plan 中的所有 RunID。
-# 部分样品缺失时仍可作 QC 预览，但必须查看状态表，不能视为完整实验。
-#
-# Ubuntu 桌面打开概览图（可选，取消注释后运行）：
-# xdg-open "$FIG_OUT/overview_01.png"
-# WSL 在 Windows 文件资源管理器打开结果目录（可选）：
-# explorer.exe "$(wslpath -w "$FIG_OUT")"
-#
-# 同一个 R 脚本也能在 Windows 使用，下面是 PowerShell 示例，不要在 Bash 粘贴：
-# $Rscript = 'C:/Program Files/R/R-<version>/bin/Rscript.exe'
-# $CODE = 'C:/path/to/rrmg-fungal-spikein'
-# $WD = 'D:/path/to/SpikeIN'
-# $FIG_OUT = "$WD/figure_output/local_preview"
-# & $Rscript "$CODE/rrmg_plot_preview.R" $WD $FIG_OUT
-# Invoke-Item "$FIG_OUT/design_hit_rates.png"
-# 支持 result/ 三张表及 figure_data/{contig_mapping,read_to_gene,target_genome}/ 备份结构。
-# 默认以 input/rrmg/rrmg_permutation_plan.tsv 为完整待检查队列；若该文件不存在，
-# 才用 figure_data/metadata/selected_plan.tsv，且在 warnings.txt 说明仅为选定子集。
-
-
-# ===== 14. 补齐位点标注和 alignment-block 绘图输入 =====
-# 仍在 Ubuntu 的 fungamr_meta 环境运行，不提交 PBS，不重新合成 reads/assembly。
-# 必须保留 Step2 target-only reads 和 Step3 QC reads；此步骤不会补造已删除的数据。
-# 使用既有 contigs、QC reads、target-only reads 重新对同一 gene FASTA 做比对，
-# 保证三类 PAF/depth 对应同一参考序列。不覆盖已有 Step1–5 文件。
-# 本段重复执行会重新生成所选 rows 的整套绘图输入，不是追加；仅重新出图可跳到第 15 段。
-# 位点表来自已存在的 TSV，并用 catalogue 的 chromosome/codon_positions 和
-# 当前 gene FASTA 的真实参考碱基核验；不使用 aa_pos*3，不推断或修复错误坐标。
-# catalogue status 非 ok、参考密码子不符或坐标不符的条目进入排除审计表。
-# 注释仅为参考位点的覆盖展示，不代表相应突变已检出；promoter/TR 不在 gene 区间时不补画。
-# 位点注释可选；两个参数同时提供或同时省略。
-: "${CODE:?先设置 CODE 为仓库目录}"
-: "${WD:?先设置 WD 为已有分析工作目录}"
-test -s "$WD/ref/CYP51A_wt.fasta"
+# ===== 13. 汇总全部绘图输入到 WD/figure_data（服务器或 Ubuntu） =====
+# 本段不运行 R、不重新比对、不读取 FASTQ；只复用 Step3/4/5 已完成的 TSV、PAF 和 depth。
+# figure_data 是可搬运的绘图输入快照；figure_output 留给本地 R 生成，不混放分析输入。
+# 四张 result 汇总表会先重新收集，再按完整 plan 严格核对。任一样品缺失即停止，
+# 不会把缺失值伪装成零。旧的非本工具管理 figure_data 会被保护，需先人工移走。
 SITE_ARGS=()
 if [[ -n "${SITES_SOURCE:-}" || -n "${CATALOGUE_SOURCE:-}" ]]; then
-    for INPUT_FILE in "${SITES_SOURCE:-}" "${CATALOGUE_SOURCE:-}"; do
-        if [[ ! -f "$INPUT_FILE" || ! -s "$INPUT_FILE" ]]; then
-            printf '[ERROR] 输入必须是非空文件：%s\n' "$INPUT_FILE" >&2
-            exit 1
-        fi
-    done
+    test -s "$SITES_SOURCE"
+    test -s "$CATALOGUE_SOURCE"
     SITE_ARGS=(--sites "$SITES_SOURCE" --catalogue "$CATALOGUE_SOURCE")
 fi
-ALIGN_INPUT="$WD/figure_data/CYP51A_alignment"
-python3 "$CODE/rrmg_prepare_alignment_inputs.py" \
+
+bash "$CODE/rrmg_collect_figure_data.sh" \
     --wd "$WD" \
+    --plan input/rrmg/rrmg_permutation_plan.tsv \
+    --root temp/rrmg_permutation \
     --gene "$WD/ref/CYP51A_wt.fasta" \
-    --out "$ALIGN_INPUT" \
-    --rows 1-2 \
-    --threads 4 \
+    --out "$WD/figure_data" \
     "${SITE_ARGS[@]}"
 
-# --rows 是 plan 中的 run_index；扩大队列时可用 1-100 或 409-480,225-230，或 all。
-# COMPLETE.json 只在所有所选样品完成后生成。无命中允许空 PAF，但 depth 必须逐碱基完整。
-# 只有看到本次 [DONE] 后才继续。失败不会替换上一轮成功结果，不要将旧 COMPLETE 当作本次成功。
-test -s "$ALIGN_INPUT/COMPLETE.json"
-find "$ALIGN_INPUT" -maxdepth 2 -type f \( -name '*.paf' -o -name '*.paf.gz' -o -name '*.depth.tsv' \) -print
-if [[ -s "$ALIGN_INPUT/site_annotation_audit.tsv" ]]; then
-    column -t -s $'\t' "$ALIGN_INPUT/site_annotation_audit.tsv"
-fi
-# 每个 row_XXXXX/：contig PAF、mixed-QC PAF.gz + depth、target-only PAF.gz + depth。
-# 总目录：gene FASTA、plot_manifest.with_target_only.tsv、校验后的位点表、原始表与审计记录。
-# BAM 只是此步骤的中间文件，验证 depth 后删除；原 BAM、FASTQ 和 contigs 均不删除。
+test -s "$WD/figure_data/COMPLETE.json"
+test -s "$WD/figure_data/FILE_MANIFEST.tsv"
+python3 -m json.tool "$WD/figure_data/COMPLETE.json"
+find "$WD/figure_data" -type f | wc -l
+du -sh "$WD/figure_data"
+
+# figure_data 包含：完整 plan、三张汇总表、每个样品的 contig PAF、两类 reads 的
+# PAF/depth、target-genome bins、目标基因 FASTA、可选位点注释、校验清单和 COMPLETE.json。
+# contig 无命中时 PAF 可以是合法空文件；其状态由汇总表和 manifest 区分，不按缺失处理。
+# 可选打包后下载：
+#   cd "$WD" && tar -czf rrmg_figure_data.tar.gz figure_data
 
 
-# ===== 15. Windows R 生成位点标注、contig alignment、read-block 图 =====
-# ggplot2/patchwork图：混合reads橙色、target-only reads灰色。
-# 用当前的 Windows R 包库，不需要在 Ubuntu 安装这些 R 包。
-ALIGN_INPUT="$WD/figure_data/CYP51A_alignment"
-ALIGN_FIG_OUT="$WD/figure_output/alignment_sites"
-bash "$CODE/rrmg_windows_r.sh" \
-    "$CODE/rrmg_plot_alignment.R" "$ALIGN_INPUT" "$ALIGN_FIG_OUT"
+# ===== 14. 下载 figure_data 后，在本地 Windows PowerShell 运行全部 R 绘图 =====
+# 这一段是 PowerShell 示例，不要粘贴到 Linux Bash。
+# 先通过 WinSCP/scp/rsync 将服务器的整个 figure_data 下载到本地工作目录，例如：
+#   D:\RRMG\SpikeIN\figure_data
+# 同时在 Windows clone/download 本仓库。随后在 PowerShell 运行：
+#
+# $CODE = 'D:\RRMG\rrmg-fungal-spikein'
+# $WD = 'D:\RRMG\SpikeIN'
+# & "$CODE\rrmg_plot_all_windows.ps1" -WorkDir $WD -CodeDir $CODE
+#
+# 多个 R 版本并存时显式指定：
+# & "$CODE\rrmg_plot_all_windows.ps1" -WorkDir $WD -CodeDir $CODE `
+#     -Rscript 'C:\Program Files\R\R-4.6.0\bin\Rscript.exe'
+#
+# 输出固定写入：
+#   $WD\figure_output\local_preview     总体检出、breadth/depth和设计比较
+#   $WD\figure_output\alignment_sites   contig/read blocks和位点覆盖
+# 两个 R 程序读取同一个 figure_data 快照，但生成不同图组；不会运行任何生信比对。
 
-find "$ALIGN_FIG_OUT" -maxdepth 2 -type f \( -name '*.png' -o -name '*.pdf' -o -name '*.tsv' \) -print
-# alignment_depth/：每个样品参考位点 + contig blocks + 两类 reads depth，PNG/PDF 和多页 PDF。
-# read_blocks/：每样品两类 reads 的 alignment blocks，PNG/PDF、多页 PDF 和 PAF 统计表。
-# CYP51A_FungAMR_site_coverage_by_run.tsv / ..._by_design.tsv：每位点覆盖统计，非突变检出表。
-# read blocks 默认最多显示每来源 350 条，是显示抽样；位点深度仍用完整 depth 数据。
-# 可选打开：explorer.exe "$(wslpath -w "$ALIGN_FIG_OUT")"
 
-
-# ===== 16. 失败后如何检查/续跑（参考命令，不自动执行） =====
+# ===== 15. 失败后如何检查/续跑（参考命令，不自动执行） =====
 # 日志：$WD/logs/local/<本次调用>/summary.tsv 和 row_1.log / row_2.log。
 # 软件详细日志在对应 run 的 reads/、qc/、asm/、readmap/ 目录。
 # 下列示例仅在确认需要时取消注释；不要从头重新生成已有 plan。

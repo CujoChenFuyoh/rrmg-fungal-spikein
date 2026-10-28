@@ -11,7 +11,7 @@ run_tests <- function() {
   on.exit(unlink(root, recursive = TRUE), add = TRUE)
   dir.create(file.path(root, "input/rrmg"), recursive = TRUE)
   dir.create(file.path(root, "result"))
-  dir.create(file.path(root, "temp/rrmg_permutation/a/readmap"), recursive = TRUE)
+  dir.create(file.path(root, "figure_data/CYP51A_alignment/row_00017"), recursive = TRUE)
   plan <- data.frame(run_id = c("a", "b"), run_index = c("17", "83"), seed = c(1, 2),
                       target_abundance = c(0.01, 0.02), total_pairs = c(10000, 10000))
   write_tsv(plan, file.path(root, "input/rrmg/rrmg_permutation_plan.tsv"))
@@ -24,7 +24,7 @@ run_tests <- function() {
   target <- data.frame(RunID = c("b", "a"), ObservedBreadthPct = c(90, 80), ObservedMeanDepth = c(2, 1),
                        TargetPairsDesign = c(200, 100), TargetPairsFastq = c(400, 100))
   write_tsv(target, file.path(root, "result/rrmg_afum_target_reads_genome_coverage_summary.tsv"))
-  depth_path <- file.path(root, "temp/rrmg_permutation/a/readmap/reads_to_GENE.depth.tsv")
+  depth_path <- file.path(root, "figure_data/CYP51A_alignment/row_00017/reads_to_GENE.depth.tsv")
   writeLines(c("gene\t1\t0", "gene\t2\t0", "gene\t3\t0"), depth_path)
   first <- collect_preview(root)
   stopifnot(identical(first$data$RunID, c("a", "b")),

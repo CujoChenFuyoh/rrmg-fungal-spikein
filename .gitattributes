@@ -4,6 +4,7 @@
 *.R text eol=lf
 *.r text eol=lf
 *.pbs text eol=lf
+*.ps1 text eol=lf
 *.py text eol=lf
 *.md text eol=lf
 *.yml text eol=lf

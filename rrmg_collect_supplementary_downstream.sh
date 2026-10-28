@@ -21,10 +21,16 @@ python3 "$SCRIPT_DIR/rrmg_collect_reads_to_gene_depth.py" \
   --root "$ROOT" \
   --out result/rrmg_reads_to_gene_depth_summary.tsv
 
+python3 "$SCRIPT_DIR/rrmg_collect_reads_to_gene_depth.py" \
+  --root "$ROOT" \
+  --input-name target_only_reads_to_GENE.coverage_summary.tsv \
+  --out result/rrmg_target_only_reads_to_gene_depth_summary.tsv
+
 python3 "$SCRIPT_DIR/rrmg_collect_afum_genome_cov.py" \
   --root "$ROOT" \
   --out result/rrmg_afum_target_reads_genome_coverage_summary.tsv
 
 echo "[DONE] Supplementary downstream summaries:"
 echo "  result/rrmg_reads_to_gene_depth_summary.tsv"
+echo "  result/rrmg_target_only_reads_to_gene_depth_summary.tsv"
 echo "  result/rrmg_afum_target_reads_genome_coverage_summary.tsv"

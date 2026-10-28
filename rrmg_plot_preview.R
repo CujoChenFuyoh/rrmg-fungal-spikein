@@ -154,6 +154,14 @@ collect_preview <- function(wd) {
   for (i in seq_len(n)) {
     # Prefer the relocated working tree over absolute paths saved on an old HPC.
     path <- file.path(wd, "temp/rrmg_permutation", ids[i], "readmap/reads_to_GENE.depth.tsv")
+    if (!nonempty(path)) {
+      portable <- file.path(
+        wd, "figure_data/CYP51A_alignment",
+        sprintf("row_%05d", as.integer(data$RowIndex[i])),
+        "reads_to_GENE.depth.tsv"
+      )
+      if (nonempty(portable)) path <- portable
+    }
     if (!nonempty(path) && "DepthTSV" %in% names(tables$reads)) {
       alternate <- tables$reads$DepthTSV[i]
       if (!is.na(alternate) && nzchar(alternate)) {

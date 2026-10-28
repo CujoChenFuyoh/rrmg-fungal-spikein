@@ -40,10 +40,13 @@ rrmg_collect_reads_to_gene_depth.py
 rrmg_collect_afum_genome_cov.py
 rrmg_collect_vamb_results.py
 rrmg_collect_supplementary_downstream.sh
+rrmg_collect_figure_data.py
+rrmg_collect_figure_data.sh
 rrmg_evaluate_vamb_bins.py
 runbook.sh
 RUNBOOK_FIGURES_README.txt
 rrmg_windows_r.sh
+rrmg_plot_all_windows.ps1
 rrmg_plot_common.R
 rrmg_plot_preview.R
 rrmg_plot_alignment.R

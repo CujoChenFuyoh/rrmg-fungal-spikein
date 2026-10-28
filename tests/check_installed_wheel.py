@@ -31,6 +31,8 @@ def main():
         assert any(n.endswith("_workflow/rrmg_run_local.sh") for n in names)
         assert any(n.endswith("_workflow/docs/INSTALL.zh-CN.md") for n in names)
         figure_assets = ("runbook.sh", "RUNBOOK_FIGURES_README.txt", "rrmg_windows_r.sh",
+                         "rrmg_plot_all_windows.ps1", "rrmg_collect_figure_data.py",
+                         "rrmg_collect_figure_data.sh",
                          "rrmg_plot_common.R", "rrmg_plot_preview.R", "rrmg_plot_alignment.R",
                          "rrmg_prepare_alignment_inputs.py")
         for asset in figure_assets:
@@ -70,9 +72,9 @@ def main():
             assert (export / asset).is_file(), "Missing exported figure asset: " + asset
         runbook = (export / "runbook.sh").read_text(encoding="utf-8")
         assert "RUNBOOK_DIR" not in runbook
-        assert 'FIG_OUT="$WD/figure_output/local_preview"' in runbook
-        assert 'ALIGN_INPUT="$WD/figure_data/CYP51A_alignment"' in runbook
-        assert 'ALIGN_FIG_OUT="$WD/figure_output/alignment_sites"' in runbook
+        assert 'bash "$CODE/rrmg_collect_figure_data.sh"' in runbook
+        assert 'rrmg_plot_all_windows.ps1' in runbook
+        assert '--out "$WD/figure_data"' in runbook
         manifest = json.loads((export / "rrmg_core_manifest.json").read_text())
         for name, digest in manifest["sha256"].items():
             assert hashlib.sha256((export / name).read_bytes()).hexdigest() == digest
@@ -93,12 +95,19 @@ def main():
         # Test this on Windows as well, rather than hiding it in the Linux branch.
         run_root = wd / "temp/rrmg_permutation"
         collectors = [
-            ("rrmg_collect_reads_to_gene_depth.py",
+            ("rrmg_collect_reads_to_gene_depth.py", [],
              "readmap/reads_to_GENE.coverage_summary.tsv",
-             "rrmg_reads_to_gene_depth_summary.tsv", "No readmap coverage summaries",
+             "rrmg_reads_to_gene_depth_summary.tsv", "No reads_to_GENE.coverage_summary.tsv files",
              [{"RunID": "run1", "RowIndex": "1", "MeanDepth": "2.500000"},
               {"RunID": "run2", "RowIndex": "2", "MeanDepth": "0.000000"}]),
-            ("rrmg_collect_afum_genome_cov.py",
+            ("rrmg_collect_reads_to_gene_depth.py",
+             ["--input-name", "target_only_reads_to_GENE.coverage_summary.tsv"],
+             "readmap/target_only_reads_to_GENE.coverage_summary.tsv",
+             "rrmg_target_only_reads_to_gene_depth_summary.tsv",
+             "No target_only_reads_to_GENE.coverage_summary.tsv files",
+             [{"RunID": "run1", "RowIndex": "1", "MeanDepth": "3.500000"},
+              {"RunID": "run2", "RowIndex": "2", "MeanDepth": "1.000000"}]),
+            ("rrmg_collect_afum_genome_cov.py", [],
              "target_readmap/afum_target_reads_to_genome.summary.tsv",
              "rrmg_afum_target_reads_genome_coverage_summary.tsv", "No target_readmap summaries",
              [{"RunID": "run1", "RowIndex": "1", "ObservedMeanDepth": "1.250000"},
@@ -107,9 +116,10 @@ def main():
         def assert_table(path, expected_rows):
             with path.open(newline="") as fh:
                 assert list(csv.DictReader(fh, delimiter="\t")) == expected_rows, path
-        for script, relative, output_name, error, records in collectors:
+        for script, extra, relative, output_name, error, records in collectors:
             out = root / "python collector outputs" / output_name
-            run("script", script, "--", "--root", run_root, "--out", out, ok=False, error=error)
+            run("script", script, "--", "--root", run_root, "--out", out, *extra,
+                ok=False, error=error)
             assert not out.exists(), "Missing-input test must not create a success output"
             # Only tiny synthetic TSVs, never project/HPC data.
             for record in records:
@@ -119,7 +129,7 @@ def main():
                     writer = csv.DictWriter(fh, fieldnames=list(record), delimiter="\t", lineterminator="\n")
                     writer.writeheader()
                     writer.writerow(record)
-            run("script", script, "--", "--root", run_root, "--out", out)
+            run("script", script, "--", "--root", run_root, "--out", out, *extra)
             assert_table(out, records)
         print("[OK] Installed Python collectors reject missing inputs and preserve two fixture rows")
         if os.name != "nt":
@@ -143,14 +153,14 @@ def main():
             empty_wd = root / "empty project"
             empty_wd.mkdir()
             run("script", "rrmg_collect_supplementary_downstream.sh", "--", empty_wd,
-                ok=False, error="No readmap coverage summaries")
+                ok=False, error="No reads_to_GENE.coverage_summary.tsv files")
             assert not (empty_wd / "result/rrmg_reads_to_gene_depth_summary.tsv").exists()
             run("script", "rrmg_collect_supplementary_downstream.sh", "--", wd)
-            for _, _, output_name, _, records in collectors:
+            for _, _, _, output_name, _, records in collectors:
                 assert_table(wd / "result" / output_name, records)
             # Also exercise the explicit absolute ROOT argument, with spaces.
             run("script", "rrmg_collect_supplementary_downstream.sh", "--", wd, run_root)
-            for _, _, output_name, _, records in collectors:
+            for _, _, _, output_name, _, records in collectors:
                 assert_table(wd / "result" / output_name, records)
             print("[OK] Linux original-runner row/failure dispatch and separate-directory collectors")
         else:

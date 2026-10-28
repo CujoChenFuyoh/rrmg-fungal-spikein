@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Prepare portable gene-alignment figures, without changing Step1-5 results.
+"""Collect existing Step3/Step4 outputs for portable alignment figures.
 
-Remaps existing contigs, QC reads and retained target-only reads to ONE gene
-reference. No read regeneration, reference editing or mutation calling occurs.
-Site annotations are validated against the supplied catalogue and reference.
+This collector never runs minimap2 or samtools. It validates and copies the
+contig PAF from Step3 plus mixed-read and target-only-read PAF/depth outputs
+from Step4. Site annotations are validated against the supplied catalogue and
+reference. No Step1-5 result is changed.
 """
 import argparse
 from contextlib import contextmanager
@@ -13,7 +14,6 @@ import hashlib
 import json
 import re
 import shutil
-import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -22,7 +22,7 @@ from pathlib import Path
 def input_file(value):
     """Reject unset shell variables before Path('') can become the current directory."""
     if not value.strip():
-        raise argparse.ArgumentTypeError("Empty file path; set SITES_SOURCE/CATALOGUE_SOURCE (runbook section 0 or 14).")
+        raise argparse.ArgumentTypeError("Empty file path; set SITES_SOURCE/CATALOGUE_SOURCE (runbook section 0 or 13).")
     path = Path(value)
     if not path.is_file() or not path.stat().st_size:
         raise argparse.ArgumentTypeError(f"Expected a non-empty file, not a directory or missing path: {value}")
@@ -196,175 +196,212 @@ def validated_sites(gene, site_file, catalogue):
     return clean, audit
 
 
-def paired_reads(folder, pattern):
-    matches = sorted(folder.glob(pattern))
-    if len(matches) != 1:
-        raise ValueError(f"Expected one R1 matching {folder / pattern}; found {len(matches)}. Retain Step2 target reads and Step3 QC reads.")
-    r1 = matches[0]
-    r2 = r1.with_name(r1.name.replace("_1.fastq.gz", "_2.fastq.gz"))
-    if not r2.is_file() or min(r1.stat().st_size, r2.stat().st_size) == 0:
-        raise ValueError(f"Missing/empty paired FASTQ: {r1}, {r2}")
-    return r1, r2
+def open_text(path):
+    return gzip.open(path, "rt", encoding="utf-8") if str(path).endswith(".gz") else Path(path).open(encoding="utf-8")
 
 
-def command(cmd, out, log):
-    with Path(out).open("wb") as handle, Path(log).open("wb") as err:
-        subprocess.run([str(c) for c in cmd], stdout=handle, stderr=err, check=True)
+def digest(path):
+    value = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(block)
+    return value.hexdigest()
 
 
-def paf_stats(path, name, length):
+def paf_stats(path, name, length, min_mapq=0):
     covered = set()
     count = 0
-    with Path(path).open() as handle:
+    with open_text(path) as handle:
         for line in handle:
             fields = line.rstrip().split("\t")
-            if len(fields) < 12 or fields[5] != name or int(fields[6]) != length:
+            try:
+                valid = len(fields) >= 12 and fields[5] == name and int(fields[6]) == length
+            except ValueError:
+                valid = False
+            if not valid:
                 raise ValueError(f"Invalid PAF/reference mismatch: {path}")
-            start, end = int(fields[7]), int(fields[8])
+            try:
+                start, end = int(fields[7]), int(fields[8])
+            except ValueError as exc:
+                raise ValueError(f"Invalid PAF coordinates: {path}") from exc
             if not 0 <= start < end <= length:
                 raise ValueError(f"PAF coordinate out of range: {path}")
+            if int(fields[11]) < min_mapq:
+                continue
             covered.update(range(start, end))
             count += 1
     return count, 100 * len(covered) / length
 
 
-def map_reads(gene, reads, prefix, threads, name, length):
-    paf = prefix.with_suffix(".paf")
-    command(["minimap2", "-x", "sr", "--secondary=no", "-t", threads, gene, *reads],
-            paf, prefix.with_suffix(".paf.log"))
-    paf_stats(paf, name, length)  # Empty successful PAF is a valid zero-hit result.
-    with paf.open("rb") as src, gzip.open(str(paf) + ".gz", "wb") as dst:
-        shutil.copyfileobj(src, dst)
-    paf.unlink()  # Only the newly generated uncompressed copy.
-    bam = prefix.with_suffix(".bam")
-    with prefix.with_suffix(".bam.log").open("wb") as log:
-        mapping = subprocess.Popen(["minimap2", "-ax", "sr", "--secondary=no", "-t", str(threads), str(gene), *map(str, reads)],
-                                   stdout=subprocess.PIPE, stderr=log)
-        try:
-            sorting = subprocess.run(["samtools", "sort", "-@", str(threads), "-o", str(bam), "-"],
-                                     stdin=mapping.stdout, stderr=log)
-        finally:
-            mapping.stdout.close()
-        rc = mapping.wait()
-        if rc or sorting.returncode:
-            raise RuntimeError(f"Read mapping/sort failed: {prefix}; minimap2={rc}, sort={sorting.returncode}")
-    subprocess.run(["samtools", "quickcheck", str(bam)], check=True)
-    depth = prefix.with_suffix(".depth.tsv")
-    command(["samtools", "depth", "-aa", bam], depth, prefix.with_suffix(".depth.log"))
+def depth_stats(path, name, length):
     values = []
-    with depth.open() as handle:
+    with Path(path).open(encoding="utf-8") as handle:
         for position, line in enumerate(handle, 1):
-            ref, pos, value = line.rstrip().split("\t")
-            if ref != name or int(pos) != position or int(value) < 0:
-                raise ValueError("Invalid per-base depth/reference positions: " + str(depth))
-            values.append(int(value))
+            fields = line.rstrip().split("\t")
+            if len(fields) != 3:
+                raise ValueError("Invalid per-base depth row: " + str(path))
+            ref, pos, value = fields
+            try:
+                pos, value = int(pos), int(value)
+            except ValueError as exc:
+                raise ValueError("Non-integer depth/position: " + str(path)) from exc
+            if ref != name or pos != position or value < 0:
+                raise ValueError("Invalid per-base depth/reference positions: " + str(path))
+            values.append(value)
     if len(values) != length:
-        raise ValueError("Depth must explicitly include every reference base, including zeros: " + str(depth))
-    bam.unlink()  # Only this helper's BAM; preserve FASTQs and original pipeline BAMs.
+        raise ValueError("Depth must explicitly include every reference base, including zeros: " + str(path))
     return 100 * sum(v > 0 for v in values) / length
+
+
+def select_rows(plan, row_spec):
+    selected = None
+    if row_spec != "all":
+        selected = set()
+        for part in row_spec.split(","):
+            if not re.fullmatch(r"\d+(-\d+)?", part):
+                raise ValueError("Invalid --rows")
+            ends = [int(x) for x in part.split("-")]
+            if ends[0] > ends[-1]:
+                raise ValueError("Descending --rows range")
+            selected.update(range(ends[0], ends[-1] + 1))
+    indices = [int(row["run_index"]) for row in plan]
+    if len(indices) != len(set(indices)) or len({row["run_id"] for row in plan}) != len(plan):
+        raise ValueError("Duplicate plan IDs")
+    if selected is not None and selected - set(indices):
+        raise ValueError("Some --rows IDs are absent from plan")
+    result = [row for row in plan if selected is None or int(row["run_index"]) in selected]
+    if not result:
+        raise ValueError("No selected plan rows")
+    return result
+
+
+def require_input(path, allow_empty=False):
+    path = Path(path)
+    if not path.is_file() or (not allow_empty and path.stat().st_size == 0):
+        raise ValueError("Missing/empty Step3/Step4 output: " + str(path))
+    return path
+
+
+def build_alignment_bundle(wd, gene, out, row_spec="all", sites_file=None, catalogue=None, plan_path=None):
+    """Build one alignment bundle from existing mappings; never run an aligner."""
+    wd, gene, out = Path(wd).resolve(), Path(gene).resolve(), Path(out)
+    plan_path = Path(plan_path).resolve() if plan_path else wd / "input/rrmg/rrmg_permutation_plan.tsv"
+    header, sequence = fasta(gene)
+    ref_name, length = header.split()[0], len(sequence)
+    plan = select_rows(table(plan_path), row_spec)
+    sites, site_audit = validated_sites(gene, sites_file, catalogue) if sites_file else ([], [])
+    if site_audit:
+        print(f"[SITES] {len(sites)} included; {sum(r['status'] == 'excluded' for r in site_audit)} excluded; see site_annotation_audit.tsv", flush=True)
+    inputs = []
+    # Check every sample before writing the bundle; do not silently drop failures.
+    for row in plan:
+        rid = row["run_id"]
+        if Path(rid).name != rid or "\\" in rid or rid in (".", ".."):
+            raise ValueError("Unsafe run_id")
+        run = wd / "temp/rrmg_permutation" / rid
+        files = dict(
+            contig_paf=require_input(run / "asm/contigs.fasta.to_GENE.paf", allow_empty=True),
+            read_depth=require_input(run / "readmap/reads_to_GENE.depth.tsv"),
+            read_paf=require_input(run / "readmap/reads_to_GENE.paf.gz"),
+            target_depth=require_input(run / "readmap/target_only_reads_to_GENE.depth.tsv"),
+            target_paf=require_input(run / "readmap/target_only_reads_to_GENE.paf.gz"),
+        )
+        _, contig_breadth = paf_stats(files["contig_paf"], ref_name, length, min_mapq=20)
+        paf_stats(files["read_paf"], ref_name, length)
+        paf_stats(files["target_paf"], ref_name, length)
+        read_breadth = depth_stats(files["read_depth"], ref_name, length)
+        target_breadth = depth_stats(files["target_depth"], ref_name, length)
+        inputs.append((row, files, contig_breadth, read_breadth, target_breadth))
+
+    source_files = [gene, plan_path, *([sites_file, catalogue] if sites_file else [])]
+    source_files += [path for _, files, *_ in inputs for path in files.values()]
+    if any(Path(path).resolve().is_relative_to(out.resolve()) for path in source_files):
+        raise ValueError("--out must not contain analysis inputs")
+    out.mkdir(parents=True, exist_ok=False)
+    shutil.copy2(gene, out / "target_gene.fasta")
+    shutil.copy2(plan_path, out / "source_plan.tsv")
+    if sites:
+        write_table(out / "CYP51A_FungAMR_sites.tsv", sites, list(sites[0]))
+        write_table(out / "site_annotation_audit.tsv", site_audit, ["label", "status", "reason"])
+        shutil.copy2(sites_file, out / "source_sites.tsv")
+        shutil.copy2(catalogue, out / "source_catalogue.tsv")
+    manifest = []
+    provenance = dict(
+        collection_mode="reuse_existing_step3_step4_outputs",
+        gene_source=str(gene),
+        reference_sequence_sha256=hashlib.sha256(sequence.encode()).hexdigest(),
+        catalogue_source=str(catalogue or ""),
+        sites_source=str(sites_file or ""),
+        runs=[],
+    )
+    for row, files, contig_breadth, read_breadth, target_breadth in inputs:
+        plot_id = "row_" + str(int(row["run_index"])).zfill(5)
+        output = out / plot_id
+        output.mkdir()
+        print("[COLLECT]", row["run_id"], flush=True)
+        destinations = dict(
+            contig_paf=output / "contigs_to_GENE.paf",
+            read_depth=output / "reads_to_GENE.depth.tsv",
+            read_paf=output / "reads_to_GENE.paf.gz",
+            target_depth=output / "target_only_reads_to_GENE.depth.tsv",
+            target_paf=output / "target_only_reads_to_GENE.paf.gz",
+        )
+        for key, source in files.items():
+            if key == "contig_paf":
+                with source.open(encoding="utf-8") as inp, destinations[key].open("w", encoding="utf-8", newline="") as dst:
+                    for line in inp:
+                        fields = line.rstrip().split("\t")
+                        if len(fields) >= 12 and int(fields[11]) >= 20:
+                            dst.write(line)
+            else:
+                shutil.copy2(source, destinations[key])
+        manifest.append(dict(
+            PlotID=plot_id, RunID=row["run_id"], Seed=row["seed"],
+            TargetAbundanceDesign=row["target_abundance"], TotalPairs=row["total_pairs"],
+            TargetGenomeCoverageExpected=row.get("target_expected_cov", row.get("target_cov", "NA")) or "NA",
+            TargetFA="target_gene.fasta", ContigPAF=f"{plot_id}/contigs_to_GENE.paf",
+            ReadDepthTSV=f"{plot_id}/reads_to_GENE.depth.tsv", ReadPAFGZ=f"{plot_id}/reads_to_GENE.paf.gz",
+            TargetOnlyReadDepthTSV=f"{plot_id}/target_only_reads_to_GENE.depth.tsv",
+            TargetOnlyReadPAFGZ=f"{plot_id}/target_only_reads_to_GENE.paf.gz",
+            ContigTargetBreadthPct=f"{contig_breadth:.6f}", ReadBreadthPct=f"{read_breadth:.6f}",
+            TargetOnlyReadBreadthPct=f"{target_breadth:.6f}",
+        ))
+        provenance["runs"].append(dict(
+            RunID=row["run_id"],
+            inputs=[dict(path=str(path), size=path.stat().st_size, mtime_ns=path.stat().st_mtime_ns,
+                         sha256=digest(path)) for path in files.values()],
+        ))
+    write_table(out / "plot_manifest.with_target_only.tsv", manifest, list(manifest[0]))
+    (out / "COMPLETE.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+    return len(manifest), len(sites)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wd", required=True, type=Path)
     parser.add_argument("--gene", required=True, type=input_file)
-    parser.add_argument("--out", required=True, type=Path, help="Fixed managed output directory; replaced only after all selected rows succeed")
+    parser.add_argument("--out", required=True, type=Path, help="Fixed managed output directory")
     parser.add_argument("--rows", default="all", help="Plan run_index IDs, e.g. 1-2 or 409-480,225-230")
-    parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--sites", type=input_file)
     parser.add_argument("--catalogue", type=input_file)
     args = parser.parse_args()
     try:
         check_output(args.out)
+        if bool(args.sites) != bool(args.catalogue):
+            raise ValueError("Use --sites and --catalogue together")
+        with managed_output(args.out) as stage:
+            # managed_output creates the staging directory; build into a child and
+            # move its contents up so the ownership marker remains at --out.
+            child = stage / "bundle"
+            count, site_count = build_alignment_bundle(
+                args.wd, args.gene, child, args.rows, args.sites, args.catalogue
+            )
+            for item in list(child.iterdir()):
+                item.rename(stage / item.name)
+            child.rmdir()
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
-    if bool(args.sites) != bool(args.catalogue):
-        parser.error("Use --sites and --catalogue together")
-    if args.threads < 1:
-        parser.error("--threads must be positive")
-    for tool in ("minimap2", "samtools"):
-        if not shutil.which(tool):
-            parser.error(f"{tool} unavailable in the active Linux environment")
-    wd, gene = args.wd.resolve(), args.gene.resolve()
-    header, sequence = fasta(gene)
-    ref_name, length = header.split()[0], len(sequence)
-    plan_path = wd / "input/rrmg/rrmg_permutation_plan.tsv"
-    plan = table(plan_path)
-    selected = None
-    if args.rows != "all":
-        selected = set()
-        for part in args.rows.split(","):
-            if not re.fullmatch(r"\d+(-\d+)?", part):
-                parser.error("Invalid --rows")
-            ends = [int(x) for x in part.split("-")]
-            if ends[0] > ends[-1]:
-                parser.error("Descending --rows range")
-            selected.update(range(ends[0], ends[-1] + 1))
-    indices = [int(r["run_index"]) for r in plan]
-    if len(indices) != len(set(indices)) or len({r['run_id'] for r in plan}) != len(plan):
-        parser.error("Duplicate plan IDs")
-    if selected is not None and selected - set(indices):
-        parser.error("Some --rows IDs are absent from plan")
-    plan = [r for r in plan if selected is None or int(r["run_index"]) in selected]
-    if not plan:
-        parser.error("No selected plan rows")
-    sites, site_audit = validated_sites(gene, args.sites, args.catalogue) if args.sites else ([], [])
-    if site_audit:
-        print(f"[SITES] {len(sites)} included; {sum(r['status'] == 'excluded' for r in site_audit)} excluded; see site_annotation_audit.tsv", flush=True)
-    inputs = []
-    # Check every sample before starting any mapping; do not silently drop failures.
-    for row in plan:
-        rid = row["run_id"]
-        if Path(rid).name != rid or "\\" in rid or rid in (".", ".."):
-            parser.error("Unsafe run_id")
-        run = wd / "temp/rrmg_permutation" / rid
-        contigs = run / "asm/contigs.fasta"
-        if not contigs.is_file() or not contigs.stat().st_size:
-            parser.error("Contigs unavailable: " + str(contigs))
-        inputs.append((row, contigs, paired_reads(run / "qc", "*_1.fastq.gz"),
-                       paired_reads(run / "reads", "*target_1.fastq.gz")))
-    # All analysis inputs must live outside the replaceable output directory.
-    source_files = [gene, plan_path, *([args.sites, args.catalogue] if args.sites else [])]
-    source_files += [p for _, contigs, qc, target_reads in inputs for p in (contigs, *qc, *target_reads)]
-    if any(p.resolve().is_relative_to(args.out.resolve()) for p in source_files):
-        parser.error("--out must not contain analysis inputs")
-    with managed_output(args.out) as out:
-        target = out / "target_gene.fasta"
-        shutil.copy2(gene, target)
-        shutil.copy2(plan_path, out / "source_plan.tsv")
-        if sites:
-            write_table(out / "CYP51A_FungAMR_sites.tsv", sites, list(sites[0]))
-            write_table(out / "site_annotation_audit.tsv", site_audit, ["label", "status", "reason"])
-            shutil.copy2(args.sites, out / "source_sites.tsv")
-            shutil.copy2(args.catalogue, out / "source_catalogue.tsv")
-        manifest = []
-        provenance = dict(gene_source=str(gene), reference_sequence_sha256=hashlib.sha256(sequence.encode()).hexdigest(),
-                          catalogue_source=str(args.catalogue), sites_source=str(args.sites), runs=[])
-        for row, contigs, qc, target_reads in inputs:
-            plot_id = "row_" + str(int(row["run_index"])).zfill(5)
-            output = out / plot_id
-            output.mkdir()
-            print("[MAP]", row["run_id"], flush=True)
-            paf = output / "contigs_to_GENE.paf"
-            command(["minimap2", "-x", "asm5", "--secondary=no", "-c", "-t", args.threads, target, contigs], paf, output / "contigs.log")
-            _, contig_breadth = paf_stats(paf, ref_name, length)
-            read_breadth = map_reads(target, qc, output / "reads_to_GENE", args.threads, ref_name, length)
-            target_breadth = map_reads(target, target_reads, output / "target_only_reads_to_GENE", args.threads, ref_name, length)
-            manifest.append(dict(PlotID=plot_id, RunID=row["run_id"], Seed=row["seed"],
-                                 TargetAbundanceDesign=row["target_abundance"], TotalPairs=row["total_pairs"],
-                                 TargetGenomeCoverageExpected=row.get("target_expected_cov", "NA") or "NA",
-                                 TargetFA="target_gene.fasta", ContigPAF=f"{plot_id}/contigs_to_GENE.paf",
-                                 ReadDepthTSV=f"{plot_id}/reads_to_GENE.depth.tsv", ReadPAFGZ=f"{plot_id}/reads_to_GENE.paf.gz",
-                                 TargetOnlyReadDepthTSV=f"{plot_id}/target_only_reads_to_GENE.depth.tsv",
-                                 TargetOnlyReadPAFGZ=f"{plot_id}/target_only_reads_to_GENE.paf.gz",
-                                 ContigTargetBreadthPct=contig_breadth, ReadBreadthPct=read_breadth,
-                                 TargetOnlyReadBreadthPct=target_breadth))
-            provenance["runs"].append(dict(RunID=row["run_id"], inputs=[dict(path=str(p), size=p.stat().st_size,
-                                                     mtime_ns=p.stat().st_mtime_ns) for p in (contigs, *qc, *target_reads)]))
-        write_table(out / "plot_manifest.with_target_only.tsv", manifest, list(manifest[0]))
-        # Marker only written after all requested rows and reference checks succeed.
-        (out / "COMPLETE.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
-    print(f"[DONE] {len(manifest)} runs; {len(sites)} validated site labels -> {args.out}")
+    print(f"[DONE] {count} runs; {site_count} validated site labels -> {args.out}")
 
 
 if __name__ == "__main__":

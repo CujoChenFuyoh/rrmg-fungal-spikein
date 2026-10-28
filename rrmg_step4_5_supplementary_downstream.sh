@@ -11,7 +11,7 @@ Usage:
 
 Purpose:
   Run both supplementary downstream checks for one RRMG permutation row:
-    A. spiked metagenome reads -> target gene, with per-base gene depth
+    A. spiked metagenome and target-only reads -> target gene, with per-base depth
     B. target-only simulated Afum reads -> Afum genome, with genome-wide coverage
 
 This wrapper calls the existing working scripts:
@@ -28,6 +28,7 @@ Options:
   --skip-target-genome           skip target-only reads -> Afum genome
 
   --raw                          Step4: use raw merged reads instead of QC reads
+  --skip-target-only-gene        Step4: skip target-only reads -> target gene
   --no-paf                       Step4: skip read-level PAF.gz
   --make-bins                    Step5: generate binned genome coverage table
   --bin-size N                   Step5: bin size, default 10000
@@ -62,6 +63,7 @@ SKIP_READ_TO_GENE=0
 SKIP_TARGET_GENOME=0
 
 USE_RAW=0
+SKIP_TARGET_ONLY_GENE=0
 NO_PAF=0
 MAKE_BINS=0
 BIN_SIZE=10000
@@ -78,6 +80,7 @@ while [[ $# -gt 0 ]]; do
     --skip-read-to-gene) SKIP_READ_TO_GENE=1; shift 1;;
     --skip-target-genome) SKIP_TARGET_GENOME=1; shift 1;;
     --raw) USE_RAW=1; shift 1;;
+    --skip-target-only-gene) SKIP_TARGET_ONLY_GENE=1; shift 1;;
     --no-paf) NO_PAF=1; shift 1;;
     --make-bins) MAKE_BINS=1; shift 1;;
     --bin-size) BIN_SIZE="$2"; shift 2;;
@@ -121,6 +124,7 @@ echo "ROOT                   = $ROOT"
 echo "THREADS                = $THREADS"
 echo "SKIP_READ_TO_GENE      = $SKIP_READ_TO_GENE"
 echo "SKIP_TARGET_GENOME     = $SKIP_TARGET_GENOME"
+echo "SKIP_TARGET_ONLY_GENE  = $SKIP_TARGET_ONLY_GENE"
 echo "++++++++++++++++++++++++++++++++++++++++"
 
 if [[ "$SKIP_READ_TO_GENE" -eq 0 ]]; then
@@ -129,10 +133,11 @@ if [[ "$SKIP_READ_TO_GENE" -eq 0 ]]; then
 
   CMD=(bash "$READS_TO_GENE_SCRIPT" "$PLAN" "$ROW_INDEX" -w "$WD" -gene "$GENE_REF" --root "$ROOT")
   [[ "$USE_RAW" -eq 1 ]] && CMD+=(--raw)
+  [[ "$SKIP_TARGET_ONLY_GENE" -eq 1 ]] && CMD+=(--skip-target-only)
   [[ "$NO_PAF" -eq 1 ]] && CMD+=(--no-paf)
   [[ "$FORCE" -eq 1 ]] && CMD+=(--force)
 
-  echo "[RUN-A] spiked metagenome reads -> target gene"
+  echo "[RUN-A] spiked metagenome + target-only reads -> target gene"
   printf ' %q' "${CMD[@]}"; echo
   "${CMD[@]}"
 else

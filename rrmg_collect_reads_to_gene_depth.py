@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Collect all per-run CYP51A read-depth summaries into one TSV.
+"""Collect one class of per-run CYP51A read-depth summaries into one TSV.
 
-Collect the available ``*/readmap/reads_to_GENE.coverage_summary.tsv`` files.
-This merges existing summaries rather than calculating coverage. Partial cohorts
-are allowed; compare collected RunIDs with the plan before interpreting results.
+By default this collects mixed-metagenome ``reads_to_GENE`` summaries. The
+``--input-name`` option also supports the Step4 target-only read summaries.
+This merges existing summaries rather than calculating coverage. Partial
+cohorts are allowed; compare collected RunIDs with the plan before interpreting
+results.
 """
 
 import argparse
@@ -17,6 +19,15 @@ from pathlib import Path
 def parse_args():
     p = argparse.ArgumentParser(description="Collect RRMG reads-to-gene depth summaries.")
     p.add_argument("--root", default="temp/rrmg_permutation", help="Permutation root directory.")
+    p.add_argument(
+        "--input-name",
+        default="reads_to_GENE.coverage_summary.tsv",
+        choices=(
+            "reads_to_GENE.coverage_summary.tsv",
+            "target_only_reads_to_GENE.coverage_summary.tsv",
+        ),
+        help="Per-run Step4 summary filename under readmap/.",
+    )
     p.add_argument("--out", default="result/rrmg_reads_to_gene_depth_summary.tsv", help="Output TSV.")
     return p.parse_args()
 
@@ -24,9 +35,11 @@ def parse_args():
 def main():
     args = parse_args()
     root = Path(args.root)
-    files = sorted(root.glob("*/readmap/reads_to_GENE.coverage_summary.tsv"))
+    files = sorted(root.glob("*/readmap/{}".format(args.input_name)))
     if not files:
-        raise SystemExit("[ERROR] No readmap coverage summaries found under {}".format(root))
+        raise SystemExit(
+            "[ERROR] No {} files found under {}".format(args.input_name, root)
+        )
 
     rows = []
     fields = None
