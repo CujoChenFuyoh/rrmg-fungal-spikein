@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.4 — 2026-10-30
+
+- Add independently resumable contig cs/cg PAF and raw/Q20 base counts for both
+  metagenomic and synthetic target-only reads. Step3/4 generate these by default;
+  existing projects can backfill them from contigs/BAMs without rebuilding reads,
+  QC, assembly or existing mapping results.
+- Validate reference, generation, source identity, options, tool versions and
+  output checksums for the new derived evidence. Missing legacy generation stays
+  UNVERIFIED; zero coverage is explicit and missing BAMs are not biological zeros.
+- Collect portable evidence, per-contig nucleotide differences, full/fragmented
+  recovery and review-only discordance flags. Add --require-base-evidence for a
+  strict evidence-complete snapshot. Do not infer false positives or FungAMR calls
+  solely from alignment breadth. Existing R coverage plotting remains compatible.
+
 ## 0.3.3 — 2026-10-28
 
 - Extend Step4 to map both mixed metagenome reads and retained target-only

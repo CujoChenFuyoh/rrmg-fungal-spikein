@@ -3,6 +3,7 @@ include rrmg_config.example.sh
 include rrmg_run_local.sh rrmg_submit.sh rrmg_preflight.sh
 include rrmg_run_one.sh rrmg_environment.sh
 include rrmg_mix_paired_fastq.py
+include rrmg_pileup_base_counts.py rrmg_gene_evidence.py rrmg_backfill_cyp51a_evidence.sh
 include runbook.sh RUNBOOK_FIGURES_README.txt rrmg_windows_r.sh rrmg_plot_all_windows.ps1
 include rrmg_plot_preview.R rrmg_plot_alignment.R rrmg_plot_common.R rrmg_prepare_alignment_inputs.py
 recursive-include examples *.sh *.pbs *.tsv *.md

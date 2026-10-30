@@ -247,8 +247,8 @@ draw_overview <- function(bundle, index, page, total) {
   par(mfrow = c(2, 2), mar = c(6.5, 4.1, 2.4, 0.9), oma = c(3.3, 0.2, 3.7, 0.2),
       family = "sans", las = 1, mgp = c(2.5, 0.8, 0), cex = 0.9)
   point_panel(d[c("ContigGeneBreadthPct", "ReadGeneBreadthPct")], d$Label,
-              "a  Target-gene breadth", "Covered reference bases (%)", c("Contigs", "Mixed QC reads"), TRUE)
-  point_panel(d["ReadGeneMeanDepth"], d$Label, "b  Target-gene read depth", "Mean depth (x)", "Mixed QC reads")
+              "a  Target-gene breadth", "Covered reference bases (%)", c("Contigs", "Reads"), TRUE)
+  point_panel(d["ReadGeneMeanDepth"], d$Label, "b  Target-gene read depth", "Mean depth (x)", "Reads")
   point_panel(d["TargetGenomeBreadthPct"], d$Label, "c  Target-only genome breadth",
               "Covered reference bases (%)", "Target-only reads", TRUE)
   point_panel(d[c("TargetPairsDesign", "TargetPairsFastq")] / 1000, d$Label,
@@ -286,7 +286,7 @@ draw_depth <- function(bundle, panels, page, total) {
       else lines(d$Position[segment], d$Depth[segment], col = "#287C8E", lwd = 1)
     }
   }
-  mtext("RRMG | mixed QC reads to target gene", side = 3, outer = TRUE, line = 1.8, font = 2, cex = 1.2)
+  mtext("RRMG | reads to target gene", side = 3, outer = TRUE, line = 1.8, font = 2, cex = 1.2)
   mtext(sprintf("Per-base depth, unsmoothed | reference records shown separately | page %d/%d", page, total),
         side = 3, outer = TRUE, line = 0.5, cex = 0.83)
   mtext("Source: samtools depth TSVs. Missing positions are not filled with zero; axes may differ between panels.",
@@ -415,6 +415,12 @@ draw_validation <- function(d) {
         side = 1, outer = TRUE, line = 2, cex = 0.8)
 }
 
+abundance_pages <- function(x) {
+  # Keep the complete abundance gradient together so the final level is never
+  # isolated merely because the number of groups is not divisible by three.
+  list(sort(unique(x)))
+}
+
 save_design_figures <- function(bundle, out) {
   d <- bundle$data
   summary <- design_summary(d)
@@ -425,7 +431,7 @@ save_design_figures <- function(bundle, out) {
     contig_metrics_by_design = list(title = "Target-gene assembly recovery by design",
       metrics = c(ContigGeneBreadthPct = "Gene breadth (%)", ContigCoveredBp = "Covered bases (bp)",
                   ContigBestAlnLen = "Best alignment (bp)", ContigBestIdentityPct = "Best identity (%)")),
-    read_metrics_by_design = list(title = "Mixed QC reads: target-gene mapping by design",
+    read_metrics_by_design = list(title = "Reads: target-gene mapping by design",
       metrics = c(ReadMappedAlignments = "Mapped alignments", ReadGeneBreadthPct = "Gene breadth (%)",
                   ReadGeneMeanDepth = "Mean depth (x)", ReadMaxDepth = "Max depth (x)", ReadBreadthGE5Pct = "Breadth at depth >=5 (%)")),
     target_genome_metrics_by_design = list(title = "Target-only genome coverage by design",
@@ -433,7 +439,7 @@ save_design_figures <- function(bundle, out) {
                   TargetGenomeBreadthPct = "Genome breadth (%)", GenomeDepthObservedOverExpected = "Observed/expected depth"))
   )
   abundance <- sort(unique(d$TargetAbundanceDesign))
-  pages <- split(abundance, ceiling(seq_along(abundance) / 3))
+  pages <- abundance_pages(abundance)
   for (name in names(sets)) {
     for (p in seq_along(pages)) {
       save_pair(file.path(out, sprintf("%s_%02d", name, p)), max(7, 4 * length(pages[[p]])),
@@ -500,7 +506,7 @@ main <- function(args = commandArgs(trailingOnly = TRUE)) {
     "detection_by_design.tsv: hits, valid denominators and missing counts for contig/read/both statuses.",
     "*_metrics_by_design: original metric families, grouped by designed abundance and total pairs; boxes require n>=3.",
     "target_expected_vs_observed: genome depth from actual target FASTQ versus mapped depth; designed versus actual pair counts.",
-    "overview_*.png/pdf: a = contig/mixed-QC-read gene breadth; b = mixed-QC-read gene mean depth;",
+    "overview_*.png/pdf: a = contig/read gene breadth; b = read gene mean depth;",
     "c = target-only genome breadth; d = designed versus counted target-only FASTQ pairs.",
     "gene_depth_*.png/pdf: raw per-base depth, one sample/reference record per panel, no smoothing.",
     "Each point is one simulation run, not a biological replicate. Descriptive groups only; no statistical tests.",

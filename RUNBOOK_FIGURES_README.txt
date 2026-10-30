@@ -24,6 +24,10 @@ Collect every plotting input (Linux server or Ubuntu; no mapping and no R):
   bash "$CODE/rrmg_collect_figure_data.sh" \
     --wd "$WD" --gene "$WD/ref/CYP51A_wt.fasta"
   Optional annotations: add --sites FILE.tsv --catalogue FILE.tsv together.
+  For base-level evidence completeness, add --require-base-evidence.
+  Step3/4 now add cs PAF and raw/Q20 base tables automatically; legacy projects
+  can run rrmg_backfill_cyp51a_evidence.sh first. See docs/BASE_EVIDENCE.md.
+  Existing R plots still show coverage, not validated SNV/FungAMR calls.
   This complete bundle also requires Step5 summary/window outputs for every run.
   The gene reference must match sequence orientation and reference coordinates.
   Invalid annotations are recorded in site_annotation_audit.tsv.

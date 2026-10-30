@@ -84,7 +84,7 @@ THREADS=2 bash "$REPO/rrmg_step4_reads_to_gene_depth.sh" \
   "$WD/input/rrmg/plan.tsv" 1 -w "$WD" -gene "$WD/ref/gene.fasta"
 
 for prefix in reads_to_GENE target_only_reads_to_GENE; do
-  for suffix in coverage_summary.tsv depth.tsv paf.gz; do
+  for suffix in coverage_summary.tsv depth.tsv paf.gz base_counts.raw.tsv.gz base_counts.q20.tsv.gz; do
     test -s "$RUN/readmap/${prefix}.${suffix}"
   done
   gzip -t "$RUN/readmap/${prefix}.paf.gz"
@@ -107,6 +107,15 @@ for prefix in ("reads_to_GENE", "target_only_reads_to_GENE"):
 PY
 
 MIXED_HASH="$(sha256sum "$RUN/readmap/reads_to_GENE.coverage_summary.tsv" | awk '{print $1}')"
+MIXED_BAM_STAT="$(stat -c '%s:%Y' "$RUN/readmap/reads_to_GENE.bam")"
+MIXED_BAM_HASH="$(sha256sum "$RUN/readmap/reads_to_GENE.bam" | awk '{print $1}')"
+# Missing evidence must not turn the complete mapping into a FASTQ remap.
+rm -f "$RUN/readmap/reads_to_GENE.base_counts.q20.tsv.gz"*
+THREADS=2 bash "$REPO/rrmg_step4_reads_to_gene_depth.sh" \
+  "$WD/input/rrmg/plan.tsv" 1 -w "$WD" -gene "$WD/ref/gene.fasta"
+test -s "$RUN/readmap/reads_to_GENE.base_counts.q20.tsv.gz"
+test "$MIXED_BAM_STAT" = "$(stat -c '%s:%Y' "$RUN/readmap/reads_to_GENE.bam")"
+test "$MIXED_BAM_HASH" = "$(sha256sum "$RUN/readmap/reads_to_GENE.bam" | awk '{print $1}')"
 rm -f "$RUN/readmap/target_only_reads_to_GENE."*
 THREADS=2 bash "$REPO/rrmg_step4_reads_to_gene_depth.sh" \
   "$WD/input/rrmg/plan.tsv" 1 -w "$WD" -gene "$WD/ref/gene.fasta"

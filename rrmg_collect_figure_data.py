@@ -136,6 +136,7 @@ def main():
     parser.add_argument("--out", type=Path)
     parser.add_argument("--sites", type=input_file)
     parser.add_argument("--catalogue", type=input_file)
+    parser.add_argument("--require-base-evidence", action="store_true")
     args = parser.parse_args()
     if bool(args.sites) != bool(args.catalogue):
         parser.error("Use --sites and --catalogue together")
@@ -179,7 +180,8 @@ def main():
 
             alignment_out = stage / "CYP51A_alignment"
             run_count, site_count = build_alignment_bundle(
-                wd, args.gene, alignment_out, "all", args.sites, args.catalogue, plan_path
+                wd, args.gene, alignment_out, "all", args.sites, args.catalogue, plan_path,
+                require_base_evidence=args.require_base_evidence, root_path=root
             )
 
             for row in plan:
@@ -198,6 +200,7 @@ def main():
                 "kind": "rrmg_figure_data",
                 "sample_count": len(plan),
                 "alignment_sample_count": run_count,
+                "base_evidence_complete": json.loads((alignment_out / "COMPLETE.json").read_text())["base_evidence_complete"],
                 "validated_site_count": site_count,
                 "source_workdir": str(wd),
                 "plan": str(plan_path),

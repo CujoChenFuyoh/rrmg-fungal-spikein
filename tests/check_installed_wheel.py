@@ -34,7 +34,9 @@ def main():
                          "rrmg_plot_all_windows.ps1", "rrmg_collect_figure_data.py",
                          "rrmg_collect_figure_data.sh",
                          "rrmg_plot_common.R", "rrmg_plot_preview.R", "rrmg_plot_alignment.R",
-                         "rrmg_prepare_alignment_inputs.py")
+                         "rrmg_prepare_alignment_inputs.py", "rrmg_gene_evidence.py",
+                         "rrmg_pileup_base_counts.py", "rrmg_backfill_cyp51a_evidence.sh",
+                         "docs/BASE_EVIDENCE.md")
         for asset in figure_assets:
             assert "rrmg_cli/_workflow/" + asset in names, "Missing figure asset: " + asset
         assert "rrmg_cli/_workflow/rrmg_mix_paired_fastq.py" in names

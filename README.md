@@ -1,6 +1,6 @@
 # RRMG fungal spike-in workflow
 
-Version `0.3.3`; release notes are in [CHANGELOG.md](CHANGELOG.md).
+Version `0.3.4`; release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 RRMG evaluates target-gene recovery across metagenomic background, target
 read fraction, sequencing depth and random-seed combinations. It generates
@@ -49,7 +49,8 @@ rrmg run step5 1-2 -t 4 --jobs 1
 
 Step3 includes fastp QC, metaSPAdes and contig-to-gene mapping. Step4 maps both
 mixed metagenome QC reads and retained target-only reads to the target gene,
-retaining PAF and per-base depth for alignment-block plots. Step5 remains the
+retaining PAF, per-base depth and raw/Q20 A/C/G/T evidence for both read sets.
+Step3 also adds a separate base-resolved contig `cs/cg` PAF. Step5 remains the
 separate target-only-read to whole-genome coverage analysis.
 
 `rrmg run` executes inside the current allocation and never submits jobs.
@@ -94,6 +95,28 @@ variant analysis. Partial cohorts can be collected; missing outputs remain
 missing rather than biological zeros. A successful collector is not a cohort
 completion check. Metric definitions and figure denominators are documented in
 the workflow and figure guides.
+
+### Base-level evidence and existing projects
+
+New Step3/4 runs generate nucleotide evidence automatically. For completed
+projects, derive it directly from existing contigs and gene-mapped BAMs:
+
+```bash
+bash "$CODE/rrmg_backfill_cyp51a_evidence.sh" -w "$WD" -r all -t 8
+bash "$CODE/rrmg_collect_figure_data.sh" --wd "$WD" \
+  --gene "$WD/ref/CYP51A_wt.fasta" --require-base-evidence
+```
+
+No FASTQ simulation, QC, assembly or read remapping is performed by backfill.
+Old PAFs, BAMs and mapping summaries are preserved. Missing BAMs fail rather
+than becoming zero calls. Fingerprint sidecars support independent resume.
+Legacy figure bundles remain collectable without `--require-base-evidence`,
+but explicitly report `base_evidence_complete=false` when inputs are missing.
+See [base evidence and interpretation](docs/BASE_EVIDENCE.md) for outputs,
+recovery categories and quality policies. These are sequence observations,
+not validated FungAMR mutation calls or phenotype predictions. Existing R
+coverage plots remain unchanged; nucleotide tables are collected for downstream
+allele annotation and plotting.
 
 ## Development and reproducibility
 

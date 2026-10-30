@@ -17,6 +17,8 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
+from rrmg_gene_evidence import (validated_evidence, validate_base_table, contig_details,
+                                marker_path, mix_generation, generation_status)
 
 
 def input_file(value):
@@ -282,7 +284,8 @@ def require_input(path, allow_empty=False):
     return path
 
 
-def build_alignment_bundle(wd, gene, out, row_spec="all", sites_file=None, catalogue=None, plan_path=None):
+def build_alignment_bundle(wd, gene, out, row_spec="all", sites_file=None, catalogue=None, plan_path=None,
+                           require_base_evidence=False, root_path=None):
     """Build one alignment bundle from existing mappings; never run an aligner."""
     wd, gene, out = Path(wd).resolve(), Path(gene).resolve(), Path(out)
     plan_path = Path(plan_path).resolve() if plan_path else wd / "input/rrmg/rrmg_permutation_plan.tsv"
@@ -298,7 +301,7 @@ def build_alignment_bundle(wd, gene, out, row_spec="all", sites_file=None, catal
         rid = row["run_id"]
         if Path(rid).name != rid or "\\" in rid or rid in (".", ".."):
             raise ValueError("Unsafe run_id")
-        run = wd / "temp/rrmg_permutation" / rid
+        run = (Path(root_path) if root_path else wd / "temp/rrmg_permutation") / rid
         files = dict(
             contig_paf=require_input(run / "asm/contigs.fasta.to_GENE.paf", allow_empty=True),
             read_depth=require_input(run / "readmap/reads_to_GENE.depth.tsv"),
@@ -326,6 +329,8 @@ def build_alignment_bundle(wd, gene, out, row_spec="all", sites_file=None, catal
         shutil.copy2(sites_file, out / "source_sites.tsv")
         shutil.copy2(catalogue, out / "source_catalogue.tsv")
     manifest = []
+    evidence_status, recoveries, differences = [], [], []
+    reference_sha = hashlib.sha256(sequence.encode()).hexdigest()
     provenance = dict(
         collection_mode="reuse_existing_step3_step4_outputs",
         gene_source=str(gene),
@@ -355,6 +360,40 @@ def build_alignment_bundle(wd, gene, out, row_spec="all", sites_file=None, catal
                             dst.write(line)
             else:
                 shutil.copy2(source, destinations[key])
+        run = (Path(root_path) if root_path else wd / "temp/rrmg_permutation") / row["run_id"]
+        current = mix_generation(run)
+        evidence_paths = {"ContigCSPAF": run / "asm/contigs.fasta.to_GENE.cs.paf"}
+        for key, prefix in (("Metagenomic", "reads_to_GENE"), ("Synthetic", "target_only_reads_to_GENE")):
+            for level in ("raw", "q20"):
+                evidence_paths[f"{key}_{level}"] = run / f"readmap/{prefix}.base_counts.{level}.tsv.gz"
+        evidence = dict(RunID=row["run_id"])
+        for key, path in evidence_paths.items():
+            signature = None
+            try:
+                signature = validated_evidence(path, reference_sha, ref_name)
+                if key != "ContigCSPAF":
+                    validate_base_table(path, ref_name, sequence, signature)
+                else:
+                    paf_stats(path, ref_name, length)
+            except (OSError, ValueError, KeyError) as exc:
+                if require_base_evidence:
+                    raise ValueError(f"Missing/invalid base evidence for {row['run_id']}: {path}; run rrmg_backfill_cyp51a_evidence.sh first ({exc})") from exc
+                evidence[key] = "MISSING_OR_INVALID"
+                continue
+            evidence[key] = "PRESENT"
+            shutil.copy2(path, output / path.name)
+            shutil.copy2(marker_path(path), output / marker_path(path).name)
+            generation = generation_status(current, signature.get("generation", ""))
+            evidence[f"{key}_Generation"] = generation
+            if key == "ContigCSPAF":
+                recovery, changes = contig_details(path, sequence)
+                recovery.update(RunID=row["run_id"], GenerationStatus=generation,
+                                DiscordanceFlag="Y" if float(recovery["CombinedContigBreadth"]) >= 90 and
+                                (read_breadth < 50 or float(recovery["CombinedContigBreadth"]) - read_breadth >= 50) else "N",
+                                Interpretation="REVIEW_REQUIRED" if generation != "MATCH" else "ALIGNMENT_EVIDENCE_ONLY")
+                recoveries.append(recovery)
+                differences.extend(dict(RunID=row["run_id"], GenerationStatus=generation, **change) for change in changes)
+        evidence_status.append(evidence)
         manifest.append(dict(
             PlotID=plot_id, RunID=row["run_id"], Seed=row["seed"],
             TargetAbundanceDesign=row["target_abundance"], TotalPairs=row["total_pairs"],
@@ -372,6 +411,17 @@ def build_alignment_bundle(wd, gene, out, row_spec="all", sites_file=None, catal
                          sha256=digest(path)) for path in files.values()],
         ))
     write_table(out / "plot_manifest.with_target_only.tsv", manifest, list(manifest[0]))
+    status_fields = ["RunID"]
+    for key in evidence_paths:
+        status_fields.extend((key, f"{key}_Generation"))
+    write_table(out / "base_evidence_status.tsv", evidence_status, status_fields)
+    write_table(out / "contig_recovery.tsv", recoveries,
+                ["RunID", "RecoveryClass", "QualifyingContigN", "MaxSingleContigBreadth", "CombinedContigBreadth",
+                 "DifferenceEventN", "GenerationStatus", "DiscordanceFlag", "Interpretation"])
+    write_table(out / "contig_differences.tsv", differences,
+                ["RunID", "ContigID", "GenePosition", "EventType", "RefAllele", "QueryAllele", "Strand", "MapQ", "Identity", "PassRecoveryFilter", "GenerationStatus"])
+    provenance["base_evidence_complete"] = all(all(row.get(key) == "PRESENT" for key in evidence_paths) for row in evidence_status)
+    provenance["recovery_filters"] = dict(min_mapq=20, min_block_length=150, min_identity_pct=95, full_breadth_pct=90)
     (out / "COMPLETE.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     return len(manifest), len(sites)
 
@@ -384,6 +434,7 @@ def main():
     parser.add_argument("--rows", default="all", help="Plan run_index IDs, e.g. 1-2 or 409-480,225-230")
     parser.add_argument("--sites", type=input_file)
     parser.add_argument("--catalogue", type=input_file)
+    parser.add_argument("--require-base-evidence", action="store_true", help="fail unless cs PAF and four base-count tables are valid for every run")
     args = parser.parse_args()
     try:
         check_output(args.out)
@@ -394,7 +445,8 @@ def main():
             # move its contents up so the ownership marker remains at --out.
             child = stage / "bundle"
             count, site_count = build_alignment_bundle(
-                args.wd, args.gene, child, args.rows, args.sites, args.catalogue
+                args.wd, args.gene, child, args.rows, args.sites, args.catalogue,
+                require_base_evidence=args.require_base_evidence
             )
             for item in list(child.iterdir()):
                 item.rename(stage / item.name)

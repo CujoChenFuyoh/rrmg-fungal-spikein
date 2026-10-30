@@ -8,6 +8,7 @@ docs/INSTALL.zh-CN.md
 docs/BBMAP.zh-CN.md
 docs/QUICKSTART.zh-CN.md
 docs/WORKFLOW.md
+docs/BASE_EVIDENCE.md
 docs/TROUBLESHOOTING.zh-CN.md
 docs/REVIEW_CHECKLIST.zh-CN.md
 rrmg_config.example.sh
@@ -15,6 +16,9 @@ rrmg_run_local.sh
 rrmg_run_one.sh
 rrmg_environment.sh
 rrmg_mix_paired_fastq.py
+rrmg_pileup_base_counts.py
+rrmg_gene_evidence.py
+rrmg_backfill_cyp51a_evidence.sh
 examples/local.sh
 pbs_example/pbs.pbs
 pbs_example/pbs_array.pbs

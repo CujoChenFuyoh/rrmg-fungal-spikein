@@ -2,6 +2,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FASTQ_MIXER="${FASTQ_MIXER:-$SCRIPT_DIR/rrmg_mix_paired_fastq.py}"
+GENE_EVIDENCE="$SCRIPT_DIR/rrmg_gene_evidence.py"
 
 usage() {
   cat <<'USAGE'
@@ -17,6 +18,7 @@ Interpretation:
   This split Step 3 measures target-gene detection, alignment identity, and
   breadth. It currently creates an empty VCF placeholder and reports VarN=0;
   it does NOT call or annotate CYP51A/fungAMR mutations.
+  Base-resolved cs/cg PAF is also retained as a separate derived file.
 
 Options:
   -gene FILE             Target gene FASTA for contig mapping
@@ -138,7 +140,15 @@ contigs_to_target_summary() {
   local sid="$1" contigs="$2" target="$3" ttype="$4" out="$5"
   if [[ ! -s "$contigs" || ! -s "$target" ]]; then echo -e "${sid}\t${ttype}\t${target}\t${contigs}\tN\t0\t0\t0\t0\tNA\t0" >> "$out"; return 0; fi
   local paf="${contigs}.to_${ttype}.paf" vcf="${contigs}.to_${ttype}.vcf"
-  minimap2 -t "$THREADS" -x asm5 "$target" "$contigs" > "$paf" 2> "${paf}.minimap2.log"
+  if [[ "$ttype" == GENE ]]; then
+    # One base-resolved alignment supplies the new derived PAF and the normal
+    # mapping summary. The completed-row path below never replaces old summaries.
+    python3 "$GENE_EVIDENCE" contigs --reference "$target" --contigs "$contigs" \
+      --output "${contigs}.to_GENE.cs.paf" --generation "$MIX_GENERATION" --threads "$THREADS"
+    cp -- "${contigs}.to_GENE.cs.paf" "$paf"
+  else
+    minimap2 -t "$THREADS" -x asm5 -c --cs=long "$target" "$contigs" > "$paf" 2> "${paf}.minimap2.log"
+  fi
   if [[ ! -s "$paf" ]]; then echo -e "${sid}\t${ttype}\t${target}\t${contigs}\tN\t0\t0\t0\t0\t${vcf}\t0" >> "$out"; return 0; fi
   local best_line best_alnlen best_ident target_len covbp breadth varn
   best_line=$(awk 'BEGIN{best=0} $12>=20{if($11>best){best=$11;line=$0}} END{print line}' "$paf")
@@ -218,6 +228,10 @@ if [[ "$FORCE" -eq 0 && -s "$SUCCESS_MARKER" && -s "$CONTIGS" && -s "$MAP_SUM" &
     echo "        Rerun this row with --force; stale assembly/mapping will not be reused." >&2
     exit 1
   }
+  marker_matches "$ASM_PROVENANCE" "$MIX_GENERATION" || {
+    echo "[ERROR] Completed Step3 has no matching assembly generation; use evidence backfill to audit legacy contigs or rebuild from current QC." >&2
+    exit 1
+  }
   require_assembly_mode
   if [[ "$SKIP_QC" -eq 0 ]]; then
     python3 "$FASTQ_MIXER" validate-fastp --json "$FASTP_JSON" --expected-pairs "$TOTAL_PAIRS"
@@ -233,6 +247,10 @@ if [[ "$FORCE" -eq 0 && -s "$SUCCESS_MARKER" && -s "$CONTIGS" && -s "$MAP_SUM" &
         echo "        Rerun this row with --force to enable/rebuild Kraken2 output." >&2
         exit 1
       }
+  fi
+  if [[ -n "$GENE_REF" ]]; then
+    python3 "$GENE_EVIDENCE" contigs --reference "$GENE_REF" --contigs "$CONTIGS" \
+      --output "${CONTIGS}.to_GENE.cs.paf" --generation "$MIX_GENERATION" --threads "$THREADS"
   fi
   echo "[SKIP] Completed Step 3 result already exists: $RUN_DIR"
   exit 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RRMG 0.3.3 本地 Ubuntu/WSL 逐段运行手册
+# RRMG 0.3.4 本地 Ubuntu/WSL 逐段运行手册
 # ------------------------------------------------------------
 # 用法：在编辑器打开本文件，按编号依次复制到同一个 Ubuntu Bash 终端。
 # 带反斜杠的多行命令、if/fi、Python heredoc 必须作为一个完整块执行。
@@ -161,7 +161,7 @@ cp -- "$CODE/VERSION" "$WD/result/workflow_VERSION.txt"
 git -C "$CODE" rev-parse HEAD > "$WD/result/workflow_commit.txt"
 git -C "$CODE" status --short > "$WD/result/workflow_status.txt"
 # 本地未提交修改不会由 commit SHA 代表，因此另存实际核心脚本快照。
-rrmg export "$WD/code_snapshot_0.3.3"
+rrmg export "$WD/code_snapshot_0.3.4"
 
 
 # ===== 5. 生成测试 plan 和背景设计（只做一次） =====
@@ -264,6 +264,9 @@ find "$WD/temp/rrmg_permutation" -path '*/asm/contigs.fasta' -type f -size +0c -
 # 新版只补 target-only mapping；--force 才会重建两类 Step4 输出。
 bash "$CODE/rrmg_submit.sh" step4 1-2 -t 4 --jobs 1
 # 默认保留PAF用于read-block图；不使用 --no-paf。
+# Step3 自动增加 contig cs/cg PAF；Step4 自动生成两类 reads 的 raw/Q20 碱基计数。
+# 已有旧项目只补证据（不重做 reads/QC/assembly/read mapping）：
+# bash "$CODE/rrmg_backfill_cyp51a_evidence.sh" -w "$WD" -r all -t 4
 
 
 # ===== 10. Step5：target-only reads → Af293 genome coverage =====
@@ -316,6 +319,10 @@ required = ['design/read_mix_audit.tsv', 'asm/contigs.fasta', 'map/target_call_s
             'readmap/target_only_reads_to_GENE.coverage_summary.tsv',
             'readmap/target_only_reads_to_GENE.depth.tsv',
             'readmap/target_only_reads_to_GENE.paf.gz',
+            'readmap/reads_to_GENE.base_counts.raw.tsv.gz',
+            'readmap/reads_to_GENE.base_counts.q20.tsv.gz',
+            'readmap/target_only_reads_to_GENE.base_counts.raw.tsv.gz',
+            'readmap/target_only_reads_to_GENE.base_counts.q20.tsv.gz',
             'target_readmap/afum_target_reads_to_genome.summary.tsv',
             'target_readmap/afum_target_reads_to_genome.bins.tsv']
 missing_files = []
@@ -336,6 +343,10 @@ for name in ['rrmg_target_gene_map_merged.tsv', 'rrmg_reads_to_gene_depth_summar
     print(f'{name}: {len(ids)} rows; missing={sorted(expected-set(ids))}; extra={sorted(set(ids)-expected)}')
     assert set(ids) == expected and len(ids) == len(expected), 'Incomplete/duplicate summary: ' + name
 assert not missing_files, 'Missing output files:\n' + '\n'.join(missing_files)
+# cs PAF可为空（没有命中），但完成侧录必须非空。
+for run_id in sorted(expected):
+    cs = wd / 'temp/rrmg_permutation' / run_id / 'asm/contigs.fasta.to_GENE.cs.paf'
+    assert cs.is_file() and Path(str(cs) + '.evidence.json').is_file(), 'Missing completed cs PAF: ' + str(cs)
 
 print('\nRunID\tTargetPairsDesign\tTargetPairsFastq\tActual/Design')
 for r in rows(wd / 'result/rrmg_afum_target_reads_genome_coverage_summary.tsv'):
@@ -397,6 +408,7 @@ bash "$CODE/rrmg_collect_figure_data.sh" \
     --plan input/rrmg/rrmg_permutation_plan.tsv \
     --root temp/rrmg_permutation \
     --gene "$WD/ref/CYP51A_wt.fasta" \
+    --require-base-evidence \
     --out "$WD/figure_data" \
     "${SITE_ARGS[@]}"
 

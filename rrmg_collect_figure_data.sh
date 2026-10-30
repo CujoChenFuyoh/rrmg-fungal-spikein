@@ -21,6 +21,7 @@ Options:
   --out DIR            managed output directory; default: WD/figure_data
   --sites FILE         optional validated-site source TSV
   --catalogue FILE     optional catalogue TSV; required with --sites
+  --require-base-evidence  require contig cs and both raw/Q20 read-count tables
 USAGE
 }
 
@@ -31,6 +32,7 @@ GENE=""
 OUT=""
 SITES=""
 CATALOGUE=""
+REQUIRE_BASE_EVIDENCE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --out) OUT="$2"; shift 2;;
     --sites) SITES="$2"; shift 2;;
     --catalogue) CATALOGUE="$2"; shift 2;;
+    --require-base-evidence) REQUIRE_BASE_EVIDENCE=1; shift;;
     -h|--help) usage; exit 0;;
     *) echo "[ERROR] Unknown option: $1" >&2; usage; exit 1;;
   esac
@@ -70,6 +73,7 @@ bash "$SCRIPT_DIR/rrmg_collect_supplementary_downstream.sh" "$WD" "$ROOT"
 
 CMD=(python3 "$SCRIPT_DIR/rrmg_collect_figure_data.py"
   --wd "$WD" --plan "$PLAN" --root "$ROOT" --gene "$GENE" --out "$OUT")
+[[ "$REQUIRE_BASE_EVIDENCE" -eq 0 ]] || CMD+=(--require-base-evidence)
 if [[ -n "$SITES" ]]; then
   CMD+=(--sites "$SITES" --catalogue "$CATALOGUE")
 fi

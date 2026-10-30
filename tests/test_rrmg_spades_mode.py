@@ -95,6 +95,18 @@ class SpadesModeTests(unittest.TestCase):
         self.assertIn('[SKIP] Completed Step 3', self.stage3().stdout)
         self.assertEqual(len(self.calls()), 1)
 
+    def test_completed_row_only_backfills_cs_without_touching_old_results(self):
+        self.stage3()
+        files = [self.run_dir / "asm/contigs.fasta", self.run_dir / "asm/contigs.fasta.to_GENE.paf",
+                 self.run_dir / "map/target_call_summary.tsv", self.run_dir / "STEP3_SUCCESS",
+                 self.run_dir / "qc/Toy.Seed1_1.fastq.gz"]
+        before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in files}
+        (self.run_dir / "asm/contigs.fasta.to_GENE.cs.paf").unlink()
+        self.stage3()
+        self.assertTrue((self.run_dir / "asm/contigs.fasta.to_GENE.cs.paf").is_file())
+        self.assertEqual(before, {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in files})
+        self.assertEqual(len(self.calls()), 1)
+
     def test_explicit_error_correction_is_recorded(self):
         self.stage3('--with-error-correction')
         self.assertNotIn('--only-assembler', self.calls()[0])
@@ -140,7 +152,7 @@ class SpadesModeTests(unittest.TestCase):
         # regardless of whether it was saved on Linux or Windows.
         minimap = self.root / 'bin/minimap2'
         minimap.write_text('#!' + sys.executable + '\n'
-                           'print("contig\\t12\\t0\\t9\\t+\\ttoy\\t12\\t0\\t9\\t9\\t9\\t60")\n')
+                           'print("contig\\t12\\t0\\t9\\t+\\ttoy\\t12\\t0\\t9\\t9\\t9\\t60\\tcg:Z:9M\\tcs:Z::9")\n')
         self.gene.write_bytes(b'>toy\nACGTAC\nGTACGT\n')
         self.stage3()
         with (self.run_dir / 'map/target_call_summary.tsv').open() as f:

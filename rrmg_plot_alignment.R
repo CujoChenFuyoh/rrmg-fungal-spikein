@@ -17,7 +17,8 @@ base_out <- job$stage
 #===============================================================================
 # CYP51A alignment and reference-site coverage from RRMG figure_data
 #
-# Read sets: mixed metagenome QC = orange; target-only synthetic reads = grey.
+# Read sources: final metagenomic reads = orange; reads simulated directly from
+# the A. fumigatus genome before mixing = grey.
 # Depth panels show overlapping coverage areas. Read blocks are exported as
 # separate per-run and multi-page figures with a TSV alignment summary.
 #
@@ -103,25 +104,18 @@ FUNGAMR_GUIDE_COLOR <- "#B04A9F"
 FUNGAMR_GUIDE_ALPHA <- 0.38
 FUNGAMR_GUIDE_LINEWIDTH <- 0.23
 
-# Read-set colors:
-#   Spiked metagenome reads = orange, more visually prominent
-#   Synthetic raw genome reads = grey baseline
-READ_SET_LEVELS <- c("Synthetic raw genome reads", "Spiked metagenome reads")
+# Read-source labels used consistently in legends, subtitles and tracks.
+TARGET_READ_LABEL <- "Simulated A. fumigatus reads"
+METAGENOME_READ_LABEL <- "Metagenomic reads"
+READ_SET_LEVELS <- c(TARGET_READ_LABEL, METAGENOME_READ_LABEL)
 
-READ_SET_COLORS <- c(
-  "Synthetic raw genome reads" = "grey55",
-  "Spiked metagenome reads" = "#D55E00"
-)
+READ_SET_COLORS <- setNames(c("grey55", "#D55E00"), READ_SET_LEVELS)
+READ_SET_FILL_COLORS <- setNames(c("grey75", "#D55E00"), READ_SET_LEVELS)
 
-READ_SET_FILL_COLORS <- c(
-  "Synthetic raw genome reads" = "grey75",
-  "Spiked metagenome reads" = "#D55E00"
-)
-
-# Alpha is opacity (0 = invisible, 1 = opaque). Keep mixed QC reads on top.
+# Alpha is opacity (0 = invisible, 1 = opaque). Keep metagenomic reads on top.
 DEPTH_TARGET_ALPHA <- 0.20
 DEPTH_SPIKED_ALPHA <- 0.45
-READ_BLOCK_ALPHA <- c("Synthetic raw genome reads" = 0.50, "Spiked metagenome reads" = 0.90)
+READ_BLOCK_ALPHA <- setNames(c(0.50, 0.90), READ_SET_LEVELS)
 
 #-------------------------------------------------------------------------------
 # helper functions
@@ -430,7 +424,7 @@ layout_combined_read_tracks <- function(spiked_paf, target_paf) {
   if (nrow(target_paf) > 0) {
     x <- layout_read_tracks_one_source(target_paf, MAX_READS_PER_SOURCE)
     if (nrow(x) > 0) {
-      x$ReadSource <- "Synthetic raw genome reads"
+      x$ReadSource <- TARGET_READ_LABEL
       out[["target_only"]] <- x
     }
   }
@@ -438,7 +432,7 @@ layout_combined_read_tracks <- function(spiked_paf, target_paf) {
   if (nrow(spiked_paf) > 0) {
     x <- layout_read_tracks_one_source(spiked_paf, MAX_READS_PER_SOURCE)
     if (nrow(x) > 0) {
-      x$ReadSource <- "Spiked metagenome reads"
+      x$ReadSource <- METAGENOME_READ_LABEL
       out[["spiked"]] <- x
     }
   }
@@ -451,7 +445,7 @@ layout_combined_read_tracks <- function(spiked_paf, target_paf) {
   df$ReadSource <- factor(df$ReadSource, levels = READ_SET_LEVELS)
 
   max_target <- df %>%
-    filter(ReadSource == "Synthetic raw genome reads") %>%
+    filter(ReadSource == TARGET_READ_LABEL) %>%
     summarise(m = ifelse(n() == 0, 0, max(track_in_source))) %>%
     pull(m)
 
@@ -460,7 +454,7 @@ layout_combined_read_tracks <- function(spiked_paf, target_paf) {
   df <- df %>%
     mutate(
       read_y = ifelse(
-        ReadSource == "Synthetic raw genome reads",
+        ReadSource == TARGET_READ_LABEL,
         track_in_source,
         track_in_source + max_target + gap
       )
@@ -583,10 +577,10 @@ get_run_plot_data <- function(row, base_dir) {
     stop("Missing/incomplete depth data: ", row$RunID, "; missing is not zero.")
   }
 
-  depth$ReadSource <- "Spiked metagenome reads"
+  depth$ReadSource <- METAGENOME_READ_LABEL
 
   if (nrow(target_only_depth) > 0) {
-    target_only_depth$ReadSource <- "Synthetic raw genome reads"
+    target_only_depth$ReadSource <- TARGET_READ_LABEL
     depth_plot_df <- bind_rows(depth, target_only_depth)
   } else {
     depth_plot_df <- depth
@@ -632,7 +626,7 @@ make_gene_panel <- function(row, gene_len) {
       !is.na(row$TargetOnlyReadBreadthPct) &&
       nzchar(as.character(row$TargetOnlyReadBreadthPct))) {
     target_only_breadth <- paste0(
-      ", synthetic read breadth=",
+      ", simulated A. fumigatus read breadth=",
       round(as.numeric(row$TargetOnlyReadBreadthPct), 1),
       "%"
     )
@@ -641,7 +635,7 @@ make_gene_panel <- function(row, gene_len) {
   info_line2 <- paste0(
     "Afum genome cov=", round(as.numeric(row$AfumGenomeCoverage), 3), "x",
     ", contig breadth=", round(as.numeric(row$ContigTargetBreadthPct), 1), "%",
-    ", spiked read breadth=", round(as.numeric(row$ReadBreadthPct), 1), "%",
+    ", metagenomic-read breadth=", round(as.numeric(row$ReadBreadthPct), 1), "%",
     target_only_breadth
   )
 
@@ -806,8 +800,8 @@ make_contig_panel <- function(paf, gene_len, guide_df = make_fungamr_guide_df(ge
 make_depth_panel <- function(depth_plot_df, gene_len, guide_df = make_fungamr_guide_df(gene_len)) {
   # Explicit layer order: pale target background, orange foreground, then outlines.
   # A zero mixed-read profile stays zero; covered-base counts disambiguate absence.
-  target_depth <- depth_plot_df %>% filter(ReadSource == "Synthetic raw genome reads")
-  spiked_depth <- depth_plot_df %>% filter(ReadSource == "Spiked metagenome reads")
+  target_depth <- depth_plot_df %>% filter(ReadSource == TARGET_READ_LABEL)
+  spiked_depth <- depth_plot_df %>% filter(ReadSource == METAGENOME_READ_LABEL)
   p <- ggplot(depth_plot_df, aes(x = pos, y = depth, color = ReadSource, fill = ReadSource)) +
     geom_area(
       data = target_depth,
@@ -828,14 +822,14 @@ make_depth_panel <- function(depth_plot_df, gene_len, guide_df = make_fungamr_gu
     # A wider dashed underlay remains visible even when both profiles coincide.
     geom_line(data = target_depth, linewidth = 0.80, alpha = 0.75, linetype = "dashed") +
     geom_line(data = spiked_depth, linewidth = 0.40, alpha = 1, linetype = "solid") +
-    scale_color_manual(values = READ_SET_COLORS, name = "Read set", drop = FALSE) +
-    scale_fill_manual(values = READ_SET_FILL_COLORS, name = "Read set", drop = FALSE) +
+    scale_color_manual(values = READ_SET_COLORS, name = "Read source", drop = FALSE) +
+    scale_fill_manual(values = READ_SET_FILL_COLORS, name = "Read source", drop = FALSE) +
     scale_x_continuous(limits = c(1, gene_len), expand = c(0, 0)) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.08))) +
     labs(
       x = "Position on CYP51A reference (bp)",
       y = "Read depth",
-      subtitle = sprintf("CYP51A covered bp | mixed QC: %d/%d; target-only: %d/%d",
+      subtitle = sprintf("CYP51A covered bp | metagenomic reads: %d/%d; simulated A. fumigatus reads: %d/%d",
                          sum(spiked_depth$depth > 0), gene_len, sum(target_depth$depth > 0), gene_len)
     ) +
     theme_gene() +
@@ -864,15 +858,15 @@ make_read_blocks_panel <- function(combined_reads, gene_len, show_title = TRUE, 
         lineend = "round"
       ) +
       scale_alpha_manual(values = READ_BLOCK_ALPHA, guide = "none") +
-      scale_color_manual(values = READ_SET_COLORS, name = "Read set", drop = FALSE) +
+      scale_color_manual(values = READ_SET_COLORS, name = "Read source", drop = FALSE) +
       scale_x_continuous(limits = c(1, gene_len), expand = c(0, 0)) +
       scale_y_reverse(expand = expansion(mult = c(0.02, 0.06))) +
       labs(
         x = "Position on CYP51A (bp)",
         y = "Read blocks",
-        subtitle = if (show_title) sprintf("Shown blocks | target-only: %d; mixed QC: %d (separate tracks)",
-          sum(combined_reads$ReadSource == "Synthetic raw genome reads"),
-          sum(combined_reads$ReadSource == "Spiked metagenome reads")) else NULL
+        subtitle = if (show_title) sprintf("Shown alignments | simulated A. fumigatus reads: %d; metagenomic reads: %d (separate tracks)",
+          sum(combined_reads$ReadSource == TARGET_READ_LABEL),
+          sum(combined_reads$ReadSource == METAGENOME_READ_LABEL)) else NULL
       ) +
       theme_gene() +
       theme(
@@ -910,8 +904,7 @@ plot_one_run <- function(row, base_dir) {
   #   3. Read-depth area plot
   # Read blocks are exported separately by plot_read_blocks_only().
   p_gene / p_contig / p_depth +
-    plot_layout(heights = c(1.35, 1.1, 1.55), guides = "collect") +
-    plot_annotation(caption = "Reference-site annotation and alignment-span coverage; not a mutation call.") &
+    plot_layout(heights = c(1.35, 1.1, 1.55), guides = "collect") &
     theme(legend.box = "horizontal", legend.position = "bottom")
 }
 
@@ -1172,8 +1165,7 @@ for (i in seq_len(nrow(manifest))) {
     p_depth <- make_depth_panel(dat$depth, dat$gene_len)
 
     p_gene / p_contig / p_depth +
-      plot_layout(heights = c(1.35, 1.1, 1.55), guides = "collect") +
-      plot_annotation(caption = "Reference-site annotation and alignment-span coverage; not a mutation call.") &
+      plot_layout(heights = c(1.35, 1.1, 1.55), guides = "collect") &
       theme(legend.box = "horizontal", legend.position = "bottom")
   }
 
@@ -1299,7 +1291,7 @@ dev.off()
 writeLines(c(
   "Reference site labels are annotations only, not detected mutations or AMR phenotypes.",
   "Site inclusion/exclusion and reference validation: see INPUT_DIR/site_annotation_audit.tsv.",
-  "Main figures: gene model, assembly blocks, mixed/target-only depth.",
+  "Main figures: gene model, assembly blocks, metagenomic/simulated A. fumigatus read depth.",
   "Read-block figures: a display-limited selection, not all input reads; see read-block summary.",
   "Coverage summaries describe aligned reference spans/depth, not base or codon correctness.",
   "Expected target genome coverage comes from the design, not actual FASTQ counts."

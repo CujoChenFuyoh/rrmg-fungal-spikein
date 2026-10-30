@@ -11,8 +11,8 @@
 | Background design | `rrmg_make_background_plan.py` | Plan, manifests, FASTA | Shared background plan/index/designs |
 | Step1 | `rrmg_step1_make_background_reads.sh` | Background designs | Paired background FASTQ and pair-count audit |
 | Step2 | `rrmg_step2_make_target_and_merge.sh` | Plan, background index/FASTQ, target genome | Exact mixed pairs, retained target pairs, generation audit |
-| Step3 | `rrmg_step3_downstream_analysis.sh` | Mixed reads, gene FASTA | fastp QC, metaSPAdes contigs, contig-to-gene summary |
-| Step4 | `rrmg_step4_reads_to_gene_depth.sh` | Mixed-QC reads, retained target-only reads, gene FASTA | Independent BAM, per-base depth, summary and PAF.gz for both read sets |
+| Step3 | `rrmg_step3_downstream_analysis.sh` | Mixed reads, gene FASTA | fastp QC, metaSPAdes contigs, contig-to-gene summary and cs/cg PAF |
+| Step4 | `rrmg_step4_reads_to_gene_depth.sh` | Mixed-QC reads, retained target-only reads, gene FASTA | Independent BAM, depth, summary, PAF.gz and raw/Q20 base counts for both read sets |
 | Step5 (optional) | `rrmg_step5_afum_target_reads_genome_cov.sh` | Target-only reads, genome | Genome coverage and optional windows |
 | Step45 | `rrmg_step4_5_supplementary_downstream.sh` | Step4/5 inputs | Both analyses; individual steps skip the other branch |
 | Step3b (optional) | `rrmg_step3b_vamb_binning.sh` | QC reads, contigs, target reference | VAMB bins and recovery metrics |
@@ -48,6 +48,10 @@ With complete gene mapping, each run invokes minimap2 five times: Step3=1,
 Step4 mixed reads=2 and Step4 target-only reads=2. Step5 adds one whole-genome
 call; optional species mapping/VAMB add other work. Figure-data collection adds
 no minimap2 or samtools call.
+
+Step4 adds four lightweight BAM pileups (raw/Q20 for each source), not four new
+FASTQ mappings. Evidence-only backfill reuses BAMs and realigns existing contigs
+once when cs tags are absent. See [base evidence](BASE_EVIDENCE.md).
 
 The three PAF sources are required for complete read/contig block figures.
 This workflow retains them by default. The low-level Step4 `--no-paf` option
